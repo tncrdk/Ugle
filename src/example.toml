@@ -1,0 +1,15 @@
+title = "Example"
+
+[spack]
+lockfile = <spack lock-file path>
+
+# Both url and filepath are optional, but at least one needs to be there. Two
+# also works
+[deps.foo-dependency]
+url = <github:url>
+filepath = <filepath>
+
+[deps.bar-dependency]
+url = <github:url>
+filepath = <filepath>
+
