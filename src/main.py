@@ -4,6 +4,7 @@ import tomllib
 import json
 import shutil
 import os
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -16,6 +17,7 @@ from typing import Optional
 
 # TODO: Snapshot which spack repos packages are coming from?
 
+# TODO: Improve error handling
 
 # ====================================================================================
 # Utils
@@ -100,6 +102,8 @@ def spack_deps(
         # Copy the spack file to the working directory
         shutil.copy(lockfile_path, work_dir / lockfile_path.name)
 
+    # TODO: Consider copying contents of lock file into the snapshot-dict
+
     # Store the location of the lock-file
     snapshot["spack"] = str(work_dir / lockfile_path.name)
 
@@ -180,34 +184,148 @@ def checkout(work_dir_str: str):
     if not work_dir.exists():
         raise ValueError(f"{work_dir} does not exist")
     lock_file_path = work_dir / "ugle.lock"
+    toml_file_path = work_dir / "ugle.toml"
     exists, err_msg = check_if_file_exists(lock_file_path)
+
+    # Check if the lock file exists
     if not exists:
         raise ValueError(err_msg)
-
+    # Open the lock file
     with open(lock_file_path, "r") as f:
         config = json.load(f)
 
+    # Check if the TOML file exists
+    exists, err_msg = check_if_file_exists(toml_file_path)
+    if not exists:
+        # Default to empty dict if the TOML file does not exist
+        toml_config = dict()
+    else:
+        with open(toml_file_path, "rb") as f:
+            toml_config = tomllib.load(f)
+
     # Commands to run when checking out the snapshot
-    commands = []
+    commands: dict[str, list[list[str]]] = dict()
 
     deps = config.get("deps")
     if deps is not None:
-        load_deps(deps, work_dir, commands)
+        load_deps(deps, toml_config, work_dir, commands)
 
+    # Run all the accumulated commands
+    print("=" * 10)
+    for dep_cmds in commands.values():
+        print("-" * 5)
+        for cmd in dep_cmds:
+            print("Running: ", " ".join(cmd))
+            output = subprocess.run(cmd, capture_output=True)
+            err = output.stderr.decode()
+            if err != "":
+                print("Error: ", err)
+            print("Finished: ", " ".join(cmd))
+    print("=" * 10)
+
+    # Notify of Spack environement
     spack_config = config.get("spack")
     if spack_config is not None:
         print("To create and activate the spack environment:")
         print(f"spack env create <name> {spack_config}")
+        print(f"spack env activate <name>")
 
 
 def load_deps(
-    deps: dict[str, dict[str, str]], work_dir: Path, commands: list[list[str]]
+    deps: dict[str, dict[str, str]],
+    toml_config: dict,
+    work_dir: Path,
+    commands: dict[str, list[list[str]]],
 ):
     for dep_name, dep in deps.items():
-        filepath = dep.get("filepath")
-        commit_hash = dep.get("hash")
+        lock_filepath = Path(dep["filepath"])
+        commit_hash = dep["hash"]
         url = dep.get("url")
-        pass
+
+        # If the dep exist in the TOML file, retrieve the filepath
+        toml_deps = toml_config.get("deps")
+        toml_filepath = None
+        if toml_deps is not None:
+            toml_dep = toml_deps.get(dep_name)
+            if toml_dep is not None:
+                toml_filepath = Path(toml_dep.get("filepath"))
+
+        # Paths to check for the commit. The last one is the default location to
+        # clone in the git repo if the other two fails.
+        clone_path = work_dir / ".." / dep_name
+        paths = [lock_filepath, toml_filepath, clone_path]
+        src = None
+        for path in paths:
+            # If the path does not exist, move on to the next
+            if path is None or not path.exists():
+                continue
+            os.chdir(path.parent)
+            if commit_exists(commit_hash):
+                # If the commit does not exist at the filepath location, move on
+                continue
+            else:
+                src = path
+
+        if src is None and url is not None:
+            # Want to clone the repo into a default location.
+            # If the folder exists, create a new folder with the same name but
+            # with a random sequence of numbers at the end
+            if clone_path.exists():
+                random_uuid = uuid.uuid4()
+                clone_path = Path(str(clone_path) + "-" + str(random_uuid))
+            # Clone the repo
+            subprocess.run(
+                ["git", "clone", url, clone_path.resolve().absolute()],
+                capture_output=True,
+            )
+            # Navigate to the cloned repo
+            os.chdir(clone_path)
+
+            # If the commit does not exist here either, return error
+            if commit_exists(commit_hash):
+                # If the commit does not exist at the filepath location, go to
+                # github if the url exists. If not abort
+                # TODO: Improve error msg
+                raise Exception("Commit can not be found at filepath")
+            # Else the cloned repo is the src
+            src = clone_path
+        elif src is None:
+            # TODO: Improve error msg
+            raise Exception("The commit could not be found")
+
+        # The absolute path to be used as key in commands dict
+        path_key = str(src.absolute())
+        # Init commands for this dep
+        commands[path_key] = []
+
+        git_status = subprocess.run(
+            ["git", "status", "--porcelain"], capture_output=True
+        ).stdout.decode()
+        if not git_status == "":
+            while True:
+                print("The working tree is not empty. Do you want to abort?")
+                print("Note that all changes will be stashed if not aborted.")
+                ans = input("[y/n]: ").strip()
+                if ans == "y":
+                    break
+                if ans == "n":
+                    raise Exception("Aborted")
+                print("Invalid input. Try again\n")
+            # If yes, run git stash before checking out
+            commands[path_key].append(["git", "stash"])
+
+        commands[path_key].append(["git", "checkout", commit_hash])
+
+
+def commit_exists(commit_hash: str) -> bool:
+    if (
+        subprocess.run(
+            ["git", "cat-file", "commit", commit_hash], capture_output=True
+        ).stderr.decode()
+        == ""
+    ):
+        return True
+    return False
 
 
 # ====================================================================================
