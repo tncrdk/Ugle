@@ -33,6 +33,7 @@ def check_if_file_exists(filename: Path) -> tuple[bool, str]:
 
 
 def create_absolute_path(path: Path, work_dir: Path) -> Path:
+    path = path.expanduser()
     if not path.is_absolute():
         return (work_dir / path).resolve()
     return path
@@ -70,9 +71,10 @@ def snapshot(work_dir_str: str):
     # Other dependencies
     deps = config.get("deps")
     if deps is None:
-        deps = {"work_dir": {"filepath": "."}}
-    else:
-        deps["work_dir"] = {"filepath": "."}
+        # deps = {"work_dir": {"filepath": "."}}
+        deps = dict()
+    # else:
+    #     deps["work_dir"] = {"filepath": "."}
 
     handle_other_deps(deps, snapshot, work_dir)
 
@@ -92,8 +94,10 @@ def spack_deps(
             f"spack has no attribute called 'lockfile' in {toml_file_path}."
         )
     lockfile_path = Path(lockfile_str)
+    print(lockfile_path)
     # Resolves the path to an absolute path
     lockfile_path = create_absolute_path(lockfile_path, work_dir)
+    print(lockfile_path)
     exists, err_msg = check_if_file_exists(lockfile_path)
     if not exists:
         raise ValueError(err_msg)
@@ -306,13 +310,13 @@ def load_deps(
                 print("The working tree is not empty. Do you want to abort?")
                 print("Note that all changes will be stashed if not aborted.")
                 ans = input("[y/n]: ").strip()
-                if ans == "y":
-                    break
                 if ans == "n":
+                    break
+                if ans == "y":
                     raise Exception("Aborted")
                 print("Invalid input. Try again\n")
             # If yes, run git stash before checking out
-            commands[path_key].append(["git", "stash"])
+            commands[path_key].append(["git", "stash", "push", "-m", "Ugle stash. Automatic"])
 
         commands[path_key].append(["git", "checkout", commit_hash])
 
@@ -349,6 +353,7 @@ def main():
     args = parser.parse_args()
     # print(args.work_dir)
     snapshot(args.work_dir)
+    # checkout(args.work_dir)
     # args.func(args)
 
 
