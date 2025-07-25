@@ -1,4 +1,4 @@
-title = "Example"
+name = "Example"
 
 [spack]
 lockfile = <spack lock-file path>

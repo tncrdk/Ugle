@@ -21,6 +21,12 @@ from typing import Optional
 
 # TODO: Improve error handling
 
+# TODO: Add the date of the snapshot to the lockfile
+
+# TODO: Consider instead of 'git checkout' the already existing repos, copy them
+# into a predetermined folder, e.g. <name>-2024-03-21, and 'git checkout'
+# there
+
 
 # ====================================================================================
 # Utils
@@ -47,7 +53,7 @@ def create_absolute_path(path: Path, work_dir: Path) -> Path:
 # ====================================================================================
 
 
-def snapshot(work_dir_str: str):
+def snapshot(work_dir_str: str, verbose: bool = False):
     snapshot = dict()
     work_dir = Path(work_dir_str).resolve()
     # Copy spack lockfile (if exists)
@@ -64,10 +70,16 @@ def snapshot(work_dir_str: str):
     with open(toml_file_path, "rb") as f:
         config = tomllib.load(f)
 
+    # Add the name of snapshot to the lockfile
+    name = config.get("name")
+    if name is None:
+        raise Exception("Name is missing from ugle.toml")
+    snapshot["name"] = name
+
     # If there is a Spack entry, handle it
     spack_config = config.get("spack")
     if spack_config is not None:
-        spack_deps(spack_config, snapshot, work_dir, toml_file_path)
+        spack_deps(spack_config, snapshot, work_dir, toml_file_path, verbose)
 
     # TODO: Handle current folder project
 
@@ -79,17 +91,23 @@ def snapshot(work_dir_str: str):
     # else:
     #     deps["work_dir"] = {"filepath": "."}
 
-    handle_other_deps(deps, snapshot, work_dir)
+    handle_other_deps(deps, snapshot, work_dir, verbose)
 
     os.chdir(work_dir)
     with open("ugle.lock", "w") as f:
         json.dump(snapshot, f)
 
+    print()
+    # print("#" * 10)
     print("DONE!")
 
 
 def spack_deps(
-    spack_config: dict[str, str], snapshot: dict, work_dir: Path, toml_file_path: Path
+    spack_config: dict[str, str],
+    snapshot: dict,
+    work_dir: Path,
+    toml_file_path: Path,
+    verbose: bool = False,
 ):
     # This should exist
     lockfile_str = spack_config.get("lockfile")
@@ -98,23 +116,33 @@ def spack_deps(
             f"spack has no attribute called 'lockfile' in {toml_file_path}."
         )
     lockfile_path = Path(lockfile_str)
+
     # Resolves the path to an absolute path
     lockfile_path = create_absolute_path(lockfile_path, work_dir)
+    if verbose:
+        print(f"Looking for spack lockfile in: {lockfile_path}")
     exists, err_msg = check_if_file_exists(lockfile_path)
     if not exists:
         raise ValueError(err_msg)
-    # lockfile is now guaranteed to be a file
+
+    if verbose:
+        print(f"Loading contents of {lockfile_path}")
+    # Extract the contents of the lockfile
     with open(lockfile_path, "r") as f:
         lockfile_content = json.load(f)
-    # if lockfile_path.parent != work_dir:
-    #     # Copy the spack file to the working directory
-    #     shutil.copy(lockfile_path, work_dir / lockfile_path.name)
 
-    # Store the location of the lock-file
+    if verbose:
+        print(f"Storing contents of {lockfile_path} in snapshot")
+    # Store the contents of the lockfile in the snapshot
     snapshot["spack"] = lockfile_content
 
 
-def handle_other_deps(deps: dict[str, dict[str, str]], snapshot: dict, work_dir: Path):
+def handle_other_deps(
+    deps: dict[str, dict[str, str]],
+    snapshot: dict,
+    work_dir: Path,
+    verbose: bool = False,
+):
     # deps structure:
     # deps = { <dep-name>: {filepath: <file>, url: <url>}, <dep-2>: {filepath: <file>, url: <url>}}
     snapshot["deps"] = dict()
@@ -123,20 +151,30 @@ def handle_other_deps(deps: dict[str, dict[str, str]], snapshot: dict, work_dir:
         url = dep.get("url")
 
         if filepath is not None:
-            local_deps(dep_name, filepath, snapshot, work_dir, url)
+            local_dep(dep_name, filepath, snapshot, work_dir, url, verbose)
         else:
             raise ValueError(
                 f"The dependency {dep_name} does not supply a filepath nor an url."
             )
 
 
-def local_deps(
-    name: str, filepath_str: str, snapshot: dict, work_dir: Path, url: Optional[str]
+def local_dep(
+    name: str,
+    filepath_str: str,
+    snapshot: dict,
+    work_dir: Path,
+    url: Optional[str],
+    verbose: bool = False,
 ):
     """
     Expected to be a local git repo
     """
     filepath = create_absolute_path(Path(filepath_str), work_dir)
+    if verbose:
+        print("=" * 10)
+        print(f"Looking for {name} in {filepath}")
+    if not filepath.exists():
+        raise Exception(f"Filepath {filepath} does not exist")
     os.chdir(filepath)
 
     git_status = subprocess.run(["git", "status", "--porcelain"], capture_output=True)
@@ -145,6 +183,10 @@ def local_deps(
         # TODO: Create better exception type and error message. Ex: which dep
         # gave the error
         raise Exception(git_status.stderr.decode())
+
+    if verbose:
+        print("-" * 4)
+        print("Checking the working tree")
     if not git_status.stdout.decode() == "":
         print(f"The working tree of {filepath} is not clean:")
         print(git_status.stdout.decode())
@@ -160,15 +202,28 @@ def local_deps(
                 # stack
                 raise Exception("Snapshot aborted")
             print("Not valid")
+    elif verbose:
+        print("Working tree is clean")
+
+    if verbose:
+        print("-" * 4)
+        print("Getting commit-hash")
     # Get the commit-hash of the commit currently being check out
     commit_hash = (
         subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True)
         .stdout.decode()
         .strip()
     )
+    if verbose:
+        print(f"Commit-hash: {commit_hash}")
 
+    if verbose:
+        print("-" * 4)
     # If url is not defined, try to get it from 'git remove -v'
     if url is None:
+        if verbose:
+            print("Trying to get url with 'git remote -v'")
+
         remote_cmd = subprocess.run(["git", "remote", "-v"], capture_output=True)
         # Regex for getting the remote url. We pick the push url since this is
         # most likely to contain new updates
@@ -180,6 +235,17 @@ def local_deps(
             # At least one match has been made, so we pick the first one. Can
             # not see how multiple matches could be made.
             url = url_remote_cmd[0]
+
+            if verbose:
+                print(f"Found url: {url}")
+        elif verbose:
+            print("Did not find url")
+    elif verbose:
+        print(f"url: {url}")
+
+    if verbose:
+        print(f"-" * 4)
+        print(f"Adding {name} to snapshot")
 
     # If there a url exists, add it to the lockfile
     if url is not None:
@@ -201,32 +267,45 @@ def local_deps(
 
 
 def checkout(work_dir_str: str, verbose: bool = False):
-    work_dir = Path(work_dir_str).resolve()
     # Copy spack lockfile (if exists)
     # store commit hash and either url or filepath to all other deps
+
+    # Get the working directory for the snapshot
+    work_dir = Path(work_dir_str).resolve()
 
     # Check existence
     if not work_dir.exists():
         raise ValueError(f"{work_dir} does not exist")
-    lock_file_path = work_dir / "ugle.lock"
-    toml_file_path = work_dir / "ugle.toml"
-    exists, err_msg = check_if_file_exists(lock_file_path)
 
+    # Create lockfile and TOML filepaths
+    lockfile_path = work_dir / "ugle.lock"
+    tomlfile_path = work_dir / "ugle.toml"
+
+    if verbose:
+        print(f"Looking for lockfile at {lockfile_path}")
     # Check if the lockfile exists
+    exists, err_msg = check_if_file_exists(lockfile_path)
     if not exists:
         raise ValueError(err_msg)
     # Open the lockfile
-    with open(lock_file_path, "r") as f:
+    with open(lockfile_path, "r") as f:
         config = json.load(f)
 
+    if verbose:
+        print(f"Looking for TOML-file at {tomlfile_path}")
     # Check if the TOML file exists
-    exists, err_msg = check_if_file_exists(toml_file_path)
-    if not exists:
+    exists, err_msg = check_if_file_exists(tomlfile_path)
+    if exists:
+        if verbose:
+            print(f"Found TOML-file at {tomlfile_path}")
+        # Open the TOML file if it exists
+        with open(tomlfile_path, "rb") as f:
+            toml_config = tomllib.load(f)
+    else:
+        if verbose:
+            print(f"Did not find TOML-file at {tomlfile_path}")
         # Default to empty dict if the TOML file does not exist
         toml_config = dict()
-    else:
-        with open(toml_file_path, "rb") as f:
-            toml_config = tomllib.load(f)
 
     # Commands to run when checking out the snapshot
     commands: dict[str, list[list[str]]] = dict()
@@ -253,7 +332,8 @@ def checkout(work_dir_str: str, verbose: bool = False):
     print("=" * 10)
     print()
 
-    # Notify of Spack environement
+    if verbose:
+        print(f"Checking for Spack dependencies")
     spack_config = config.get("spack")
     # If there is a Spack env
     if spack_config is not None:
@@ -275,10 +355,13 @@ def checkout(work_dir_str: str, verbose: bool = False):
                     break
                 print("Invalid input")
 
+        if verbose:
+            print(f"Dumping Spack lockfile into {spack_file}")
         # Create lockfile and dump the lockfile contents into it
         with open(spack_file, "w") as f:
             json.dump(spack_config, f)
 
+        # Notify of Spack environement
         print()
         print("#" * 60)
         print("To create and activate the spack environment:")
@@ -460,8 +543,8 @@ def main():
 
     args = parser.parse_args()
     # print(args.work_dir)
-    # snapshot(args.work_dir)
-    checkout(args.work_dir, verbose=True)
+    snapshot(args.work_dir, verbose=True)
+    # checkout(args.work_dir, verbose=True)
     # args.func(args)
 
 
