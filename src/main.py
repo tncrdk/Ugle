@@ -5,6 +5,7 @@ import subprocess
 import tomllib
 import json
 import os
+import shutil
 import uuid
 import re
 from pathlib import Path
@@ -46,6 +47,11 @@ def create_absolute_path(path: Path, work_dir: Path) -> Path:
     if not path.is_absolute():
         return (work_dir / path).resolve()
     return path
+
+
+def verbose_print(verbose: bool, msg: str) -> None:
+    if verbose:
+        print(msg)
 
 
 # ====================================================================================
@@ -281,44 +287,55 @@ def checkout(work_dir_str: str, verbose: bool = False):
     lockfile_path = work_dir / "ugle.lock"
     tomlfile_path = work_dir / "ugle.toml"
 
-    if verbose:
-        print(f"Looking for lockfile at {lockfile_path}")
+    verbose_print(verbose, f"Looking for lockfile at {lockfile_path}")
     # Check if the lockfile exists
     exists, err_msg = check_if_file_exists(lockfile_path)
     if not exists:
         raise ValueError(err_msg)
+    verbose_print(verbose, f"Found lockfile at {lockfile_path}")
     # Open the lockfile
     with open(lockfile_path, "r") as f:
         config = json.load(f)
+
+    # Create the checkout directory where the snapshot will be rebuilt
+    name: Optional[str] = config.get("name")
+    if name is None:
+        raise Exception("Name is None")
+    checkout_dir = (Path("~/.ugle/") / name).expanduser().resolve().absolute()
 
     if verbose:
         print(f"Looking for TOML-file at {tomlfile_path}")
     # Check if the TOML file exists
     exists, err_msg = check_if_file_exists(tomlfile_path)
     if exists:
-        if verbose:
-            print(f"Found TOML-file at {tomlfile_path}")
+        verbose_print(verbose, f"Found TOML-file at {tomlfile_path}")
         # Open the TOML file if it exists
         with open(tomlfile_path, "rb") as f:
             toml_config = tomllib.load(f)
     else:
-        if verbose:
-            print(f"Did not find TOML-file at {tomlfile_path}")
+        verbose_print(verbose, f"Did not find TOML-file at {tomlfile_path}")
         # Default to empty dict if the TOML file does not exist
         toml_config = dict()
+
+    verbose_print(verbose, "-" * 10)
 
     # Commands to run when checking out the snapshot
     commands: dict[str, list[list[str]]] = dict()
 
     deps = config.get("deps")
     if deps is not None:
-        load_deps(deps, toml_config, work_dir, commands, verbose)
+        load_deps(deps, toml_config, work_dir, checkout_dir, commands, verbose)
+
+    # Make sure the snapshot directory exists
+    checkout_dir.mkdir(parents=True, exist_ok=True)
 
     # Run all the accumulated commands
     print()
     print("=" * 10)
     for dir, dep_cmds in commands.items():
         print("-" * 5)
+        # Make sure the directory exists
+        Path(dir).mkdir(parents=True, exist_ok=True)
         os.chdir(dir)
         print(f"In: {dir}")
         for cmd in dep_cmds:
@@ -332,31 +349,18 @@ def checkout(work_dir_str: str, verbose: bool = False):
     print("=" * 10)
     print()
 
-    if verbose:
-        print(f"Checking for Spack dependencies")
+    verbose_print(verbose, f"Checking for Spack dependencies")
     spack_config = config.get("spack")
     # If there is a Spack env
     if spack_config is not None:
-        spack_file = work_dir / Path("spack.lock")
+        spack_file = checkout_dir / Path("spack.lock")
         # Check that we are not overwriting any files when creating the
         # spack.lock file. If we are, append a uuid at the end.
         if spack_file.exists():
-            while True:
-                print(spack_file, " already exists.")
-                print("Do you want to overwrite it?")
-                res = input("[y/n]: ").strip()
-                if res == "n":
-                    random_uuid = uuid.uuid4()
-                    spack_file = work_dir / Path(
-                        str(spack_file.stem) + "-" + str(random_uuid) + ".lock"
-                    )
-                    break
-                if res == "y":
-                    break
-                print("Invalid input")
+            verbose_print(verbose, f"Removing old spack.lock: {spack_file}")
+            os.remove(spack_file)
 
-        if verbose:
-            print(f"Dumping Spack lockfile into {spack_file}")
+        verbose_print(verbose, f"Dumping Spack lockfile into {spack_file}")
         # Create lockfile and dump the lockfile contents into it
         with open(spack_file, "w") as f:
             json.dump(spack_config, f)
@@ -376,6 +380,7 @@ def load_deps(
     deps: dict[str, dict[str, str]],
     toml_config: dict,
     work_dir: Path,
+    checkout_dir: Path,
     commands: dict[str, list[list[str]]],
     verbose: bool = False,
 ):
@@ -402,6 +407,7 @@ def load_deps(
             commit_hash,
             url,
             work_dir,
+            checkout_dir,
             commands,
             verbose,
         )
@@ -414,97 +420,97 @@ def load_dep(
     commit_hash: str,
     url: Optional[str],
     work_dir: Path,
+    checkout_dir: Path,
     commands: dict[str, list[list[str]]],
     verbose: bool = False,
 ):
     # Paths to check for the commit. The last one is the default location to
     # clone in the git repo if the other two fails.
-    clone_path = (work_dir / ".." / dep_name).resolve().absolute()
-    paths = [lockfile_path, tomlfile_path, clone_path]
+    destination_path = checkout_dir / dep_name
+    destination_path_str = str(destination_path)
     src = None
+    commands[destination_path_str] = []
 
-    if verbose:
-        print(f"Looking for commit: {commit_hash}")
+    verbose_print(verbose, f"Looking for commit: {commit_hash}")
+    verbose_print(verbose, f"Looking in {destination_path}")
 
-    for path in paths:
-        if verbose:
-            print("Looking for commit in: ", path)
+    # If the directory already exists, check if commit can be found there
+    if destination_path.exists():
+        if commit_exists(destination_path, commit_hash):
+            # If the commit exists here, we don't have to do anything
+            verbose_print(verbose, f"Found commit at {destination_path}")
+            src = destination_path
+        else:
+            # If the commit can not be found, remove this directory
+            verbose_print(verbose, f"Commit not found. Will remove {destination_path}")
+            shutil.rmtree(destination_path)
 
-        # If the path does not exist, move on to the next
-        if path is None or not path.exists():
-            continue
-        if commit_exists(path, commit_hash):
-            # If the commit exists at the filepath location, break
-            if verbose:
-                print("Found commit in: ", path)
-            src = path
-            break
+    # If we did not find the commit there already, we need to search more
+    # directories
+    if src is None:
+        search_paths = [lockfile_path, tomlfile_path]
 
-    if src is None and url is not None:
-        # Want to clone the repo into a default location.
-        # If the folder exists, create a new folder with the same name but
-        # with a random sequence of numbers at the end
-        if clone_path.exists():
-            random_uuid = uuid.uuid4()
-            clone_path = Path(str(clone_path) + "-" + str(random_uuid))
+        for path in search_paths:
+            verbose_print(verbose, f"Looking in {path}")
 
-        if verbose:
-            print(f"Cloning from {url} into {clone_path}")
+            # If the path does not exist, move on to the next
+            if path is None or not path.exists():
+                continue
+            if commit_exists(path, commit_hash):
+                # If the commit exists at the filepath location, break
+                verbose_print(verbose, f"Found commit in: {path}")
+                src = path
+                commands[destination_path_str].append(
+                    ["cp", "-r", str(path), str(destination_path.parent)]
+                )
+                break
 
-        # Clone the repo
-        subprocess.run(
-            ["git", "clone", url, clone_path],
-            capture_output=True,
-        )
-        # If the commit does not exist here either, return error
-        if not commit_exists(clone_path, commit_hash):
-            # TODO: Improve error msg
-            raise Exception("Commit can not be found at filepath")
-        # Else the cloned repo is the src
-        src = clone_path
+        if src is None and url is not None:
+            # Want to clone the repo to see if it has the commit.
 
-        if verbose:
-            print("Found commit in: ", src)
+            # Clone the repo
+            verbose_print(verbose, f"Cloning from {url} into {destination_path}")
+            subprocess.run(["git", "clone", url, destination_path])
 
-    elif src is None:
+            if commit_exists(destination_path, commit_hash):
+                # If the commit exists, move it to the destination directory
+                verbose_print(verbose, f"Commit found at {url}.")
+                found_commit = True
+                src = destination_path
+            else:
+                # If the commit does not exist, remove the pulled repo
+                verbose_print(
+                    verbose, f"Commit not found at {destination_path}. Cleaning up"
+                )
+                shutil.rmtree(destination_path)
+
+    if src is None:
         # TODO: Improve error msg
         raise Exception("The commit could not be found")
-
-    # The absolute path to be used as key in commands dict
-    path_key = str(src.resolve().absolute())
-    # Init commands for this dep
-    commands[path_key] = []
 
     # Make sure we are in the source location
     os.chdir(src)
 
+    # Get 'git status' but ignoring untracked files
     git_status = subprocess.run(
         ["git", "status", "--porcelain", "--untracked-files=no"], capture_output=True
     ).stdout.decode()
     if not git_status == "":
-        while True:
-            print(
-                f"The working tree at {path_key} is not empty. Do you want to continue?"
-            )
-            print("Note that all changes will be stashed if not aborted.")
-            ans = input("[y/n]: ").strip()
-            if ans == "y":
-                break
-            if ans == "n":
-                raise Exception("Aborted")
-            print("Invalid input. Try again\n")
-        # If yes, run git stash before checking out
-        commands[path_key].append(
-            ["git", "stash", "push", "-m", "Ugle stash. Automatic"]
-        )
+        # Remove all non-committed changes and untracked files
+        # from destination_path (not src)
+        commands[destination_path_str].append(["git", "reset", "--hard", "HEAD"])
 
-    commands[path_key].append(["git", "checkout", commit_hash])
+        # TODO: Figure out if we want to remove untracked files as well. Should
+        # change the 'if not git_status == ""' as well
+
+        # commands[destination_path_str].append(["git", "clean", "-dfx"])
+
+    commands[destination_path_str].append(["git", "checkout", commit_hash])
 
     # Change back to work_dir
     os.chdir(work_dir)
 
-    if verbose:
-        print("-" * 10)
+    verbose_print(verbose, "-" * 10)
 
 
 def commit_exists(path: Path, commit_hash: str) -> bool:
@@ -543,8 +549,8 @@ def main():
 
     args = parser.parse_args()
     # print(args.work_dir)
-    snapshot(args.work_dir, verbose=True)
-    # checkout(args.work_dir, verbose=True)
+    # snapshot(args.work_dir, verbose=True)
+    checkout(args.work_dir, verbose=True)
     # args.func(args)
 
 
