@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-import utils
+from utils import verbose_print, check_if_file_exists
 
 
 # ====================================================================================
@@ -29,12 +29,12 @@ def checkout(work_dir_str: str, verbose: bool = False):
     lockfile_path = work_dir / "ugle.lock"
     tomlfile_path = work_dir / "ugle.toml"
 
-    utils.verbose_print(verbose, f"Looking for lockfile at {lockfile_path}")
+    verbose_print(verbose, f"Looking for lockfile at {lockfile_path}")
     # Check if the lockfile exists
-    exists, err_msg = utils.check_if_file_exists(lockfile_path)
+    exists, err_msg = check_if_file_exists(lockfile_path)
     if not exists:
         raise FileNotFoundError(err_msg)
-    utils.verbose_print(verbose, f"Found lockfile at {lockfile_path}")
+    verbose_print(verbose, f"Found lockfile at {lockfile_path}")
     # Open the lockfile
     with open(lockfile_path, "r") as f:
         config = json.load(f)
@@ -45,20 +45,20 @@ def checkout(work_dir_str: str, verbose: bool = False):
         raise ValueError("'name' not found")
     checkout_dir = (Path("~/.ugle/") / name).expanduser().resolve().absolute()
 
-    utils.verbose_print(verbose, f"Looking for TOML-file at {tomlfile_path}")
+    verbose_print(verbose, f"Looking for TOML-file at {tomlfile_path}")
     # Check if the TOML file exists
-    exists, err_msg = utils.check_if_file_exists(tomlfile_path)
+    exists, err_msg = check_if_file_exists(tomlfile_path)
     if exists:
-        utils.verbose_print(verbose, f"Found TOML-file at {tomlfile_path}")
+        verbose_print(verbose, f"Found TOML-file at {tomlfile_path}")
         # Open the TOML file if it exists
         with open(tomlfile_path, "rb") as f:
             toml_config = tomllib.load(f)
     else:
-        utils.verbose_print(verbose, f"Did not find TOML-file at {tomlfile_path}")
+        verbose_print(verbose, f"Did not find TOML-file at {tomlfile_path}")
         # Default to empty dict if the TOML file does not exist
         toml_config = dict()
 
-    utils.verbose_print(verbose, "-" * 10)
+    verbose_print(verbose, "-" * 10)
 
     # Commands to run when checking out the snapshot
     commands: dict[str, list[list[str]]] = dict()
@@ -89,7 +89,7 @@ def checkout(work_dir_str: str, verbose: bool = False):
     print("=" * 10)
     print()
 
-    utils.verbose_print(verbose, f"Checking for Spack dependencies")
+    verbose_print(verbose, f"Checking for Spack dependencies")
     spack_config = config.get("spack")
     # If there is a Spack env
     if spack_config is not None:
@@ -97,10 +97,10 @@ def checkout(work_dir_str: str, verbose: bool = False):
         # Check that we are not overwriting any files when creating the
         # spack.lock file. If we are, append a uuid at the end.
         if spack_file.exists():
-            utils.verbose_print(verbose, f"Removing old spack.lock: {spack_file}")
+            verbose_print(verbose, f"Removing old spack.lock: {spack_file}")
             os.remove(spack_file)
 
-        utils.verbose_print(verbose, f"Dumping Spack lockfile into {spack_file}")
+        verbose_print(verbose, f"Dumping Spack lockfile into {spack_file}")
         # Create lockfile and dump the lockfile contents into it
         with open(spack_file, "w") as f:
             json.dump(spack_config, f)
@@ -171,18 +171,18 @@ def load_dep(
     src = None
     commands[destination_path_str] = []
 
-    utils.verbose_print(verbose, f"Looking for commit: {commit_hash}")
-    utils.verbose_print(verbose, f"Looking in {destination_path}")
+    verbose_print(verbose, f"Looking for commit: {commit_hash}")
+    verbose_print(verbose, f"Looking in {destination_path}")
 
     # If the directory already exists, check if commit can be found there
     if destination_path.exists():
         if commit_exists(destination_path, commit_hash):
             # If the commit exists here, we don't have to do anything
-            utils.verbose_print(verbose, f"Found commit at {destination_path}")
+            verbose_print(verbose, f"Found commit at {destination_path}")
             src = destination_path
         else:
             # If the commit can not be found, remove this directory
-            utils.verbose_print(
+            verbose_print(
                 verbose, f"Commit not found. Will remove {destination_path}"
             )
             shutil.rmtree(destination_path)
@@ -193,14 +193,14 @@ def load_dep(
         search_paths = [lockfile_path, tomlfile_path]
 
         for path in search_paths:
-            utils.verbose_print(verbose, f"Looking in {path}")
+            verbose_print(verbose, f"Looking in {path}")
 
             # If the path does not exist, move on to the next
             if path is None or not path.exists():
                 continue
             if commit_exists(path, commit_hash):
                 # If the commit exists at the filepath location, break
-                utils.verbose_print(verbose, f"Found commit in: {path}")
+                verbose_print(verbose, f"Found commit in: {path}")
                 src = path
                 commands[destination_path_str].append(
                     ["cp", "-r", str(path), str(destination_path.parent)]
@@ -211,17 +211,17 @@ def load_dep(
             # Want to clone the repo to see if it has the commit.
 
             # Clone the repo
-            utils.verbose_print(verbose, f"Cloning from {url} into {destination_path}")
+            verbose_print(verbose, f"Cloning from {url} into {destination_path}")
             subprocess.run(["git", "clone", url, destination_path])
 
             if commit_exists(destination_path, commit_hash):
                 # If the commit exists, move it to the destination directory
-                utils.verbose_print(verbose, f"Commit found at {url}.")
+                verbose_print(verbose, f"Commit found at {url}.")
                 found_commit = True
                 src = destination_path
             else:
                 # If the commit does not exist, remove the pulled repo
-                utils.verbose_print(
+                verbose_print(
                     verbose, f"Commit not found at {destination_path}. Cleaning up"
                 )
                 shutil.rmtree(destination_path)
@@ -252,7 +252,7 @@ def load_dep(
     # Change back to work_dir
     os.chdir(work_dir)
 
-    utils.verbose_print(verbose, "-" * 10)
+    verbose_print(verbose, "-" * 10)
 
 
 def commit_exists(path: Path, commit_hash: str) -> bool:

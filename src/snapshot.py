@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Optional
 
-import utils
+from utils import check_if_file_exists, create_absolute_path, verbose_print
 
 
 # ====================================================================================
@@ -25,7 +25,7 @@ def snapshot(work_dir_str: str, verbose: bool = False):
     if not work_dir.exists():
         raise FileNotFoundError(f"{work_dir} does not exist")
     toml_file_path = work_dir / "ugle.toml"
-    exists, err_msg = utils.check_if_file_exists(toml_file_path)
+    exists, err_msg = check_if_file_exists(toml_file_path)
     if not exists:
         raise FileNotFoundError(err_msg)
 
@@ -79,18 +79,18 @@ def spack_deps(
     lockfile_path = Path(lockfile_str)
 
     # Resolves the path to an absolute path
-    lockfile_path = utils.create_absolute_path(lockfile_path, work_dir)
-    utils.verbose_print(verbose, f"Looking for spack lockfile in: {lockfile_path}")
-    exists, err_msg = utils.check_if_file_exists(lockfile_path)
+    lockfile_path = create_absolute_path(lockfile_path, work_dir)
+    verbose_print(verbose, f"Looking for spack lockfile in: {lockfile_path}")
+    exists, err_msg = check_if_file_exists(lockfile_path)
     if not exists:
         raise FileNotFoundError(err_msg)
 
-    utils.verbose_print(verbose, f"Loading contents of {lockfile_path}")
+    verbose_print(verbose, f"Loading contents of {lockfile_path}")
     # Extract the contents of the lockfile
     with open(lockfile_path, "r") as f:
         lockfile_content = json.load(f)
 
-    utils.verbose_print(verbose, f"Storing contents of {lockfile_path} in snapshot")
+    verbose_print(verbose, f"Storing contents of {lockfile_path} in snapshot")
     # Store the contents of the lockfile in the snapshot
     snapshot["spack"] = lockfile_content
 
@@ -127,9 +127,9 @@ def local_dep(
     """
     Expected to be a local git repo
     """
-    filepath = utils.create_absolute_path(Path(filepath_str), work_dir)
-    utils.verbose_print(verbose, "=" * 10)
-    utils.verbose_print(verbose, f"Looking for {name} in {filepath}")
+    filepath = create_absolute_path(Path(filepath_str), work_dir)
+    verbose_print(verbose, "=" * 10)
+    verbose_print(verbose, f"Looking for {name} in {filepath}")
     if not filepath.exists():
         raise FileNotFoundError(f"Filepath {filepath} does not exist")
     os.chdir(filepath)
@@ -141,8 +141,8 @@ def local_dep(
         # gave the error
         raise Exception(git_status.stderr.decode())
 
-    utils.verbose_print(verbose, "-" * 4)
-    utils.verbose_print(verbose, "Checking the working tree")
+    verbose_print(verbose, "-" * 4)
+    verbose_print(verbose, "Checking the working tree")
     if git_status.stdout.decode() != "":
         print(f"The working tree of {filepath} is not clean:")
         print(git_status.stdout.decode())
@@ -160,22 +160,22 @@ def local_dep(
 
             print("Not valid")
     else:
-        utils.verbose_print(verbose, "Working tree is clean")
+        verbose_print(verbose, "Working tree is clean")
 
-    utils.verbose_print(verbose, "-" * 4)
-    utils.verbose_print(verbose, "Getting commit-hash")
+    verbose_print(verbose, "-" * 4)
+    verbose_print(verbose, "Getting commit-hash")
     # Get the commit-hash of the commit currently being check out
     commit_hash = (
         subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True)
         .stdout.decode()
         .strip()
     )
-    utils.verbose_print(verbose, f"Commit-hash: {commit_hash}")
-    utils.verbose_print(verbose, "-" * 4)
+    verbose_print(verbose, f"Commit-hash: {commit_hash}")
+    verbose_print(verbose, "-" * 4)
 
     # If url is not defined, try to get it from 'git remove -v'
     if url is None:
-        utils.verbose_print(verbose, "Trying to get url with 'git remote -v'")
+        verbose_print(verbose, "Trying to get url with 'git remote -v'")
 
         remote_cmd = subprocess.run(["git", "remote", "-v"], capture_output=True)
         # Regex for getting the remote url. We pick the push url since this is
@@ -189,14 +189,14 @@ def local_dep(
             # not see how multiple matches could be made.
             url = url_remote_cmd[0]
 
-            utils.verbose_print(verbose, f"Found url: {url}")
+            verbose_print(verbose, f"Found url: {url}")
         else:
-            utils.verbose_print(verbose, "Did not find url")
+            verbose_print(verbose, "Did not find url")
     else:
-        utils.verbose_print(verbose, f"url: {url}")
+        verbose_print(verbose, f"url: {url}")
 
-    utils.verbose_print(verbose, f"-" * 4)
-    utils.verbose_print(verbose, f"Adding {name} to snapshot")
+    verbose_print(verbose, f"-" * 4)
+    verbose_print(verbose, f"Adding {name} to snapshot")
 
     # If there a url exists, add it to the lockfile
     if url is not None:
