@@ -9,7 +9,7 @@ from typing import Optional
 
 from utils import check_if_file_exists, create_absolute_path, verbose_print
 
-# TODO: Document exceptions
+# TODO: Better printing
 
 # ====================================================================================
 # Snapshot
@@ -222,16 +222,16 @@ def local_dep(
 
     git_status = subprocess.run(["git", "status", "--porcelain"], capture_output=True)
     # If something goes wrong with the above command, it needs to be fixed
+    # outside the script
     if not git_status.returncode == 0:
-        # TODO: Create better exception type and error message. Ex: which dep
-        # gave the error
-        raise Exception(git_status.stderr.decode())
+        raise Exception(git_status.stderr.decode() + f"\n\nEncountered while processing {name} at {filepath}")
 
     verbose_print(verbose, "-" * 4)
     verbose_print(verbose, "Checking the working tree")
     if git_status.stdout.decode() != "":
         print(f"The working tree of {filepath} is not clean:")
         print(git_status.stdout.decode())
+        # TODO: Maybe remove the TUI-part, and just print a warning
         while True:
             print(
                 "Do you want to continue creating a snapshot? Note that only committed changes will be added to the snapshot."
@@ -240,8 +240,6 @@ def local_dep(
             if ans == "y":
                 break
             elif ans == "n":
-                # TODO: Create better error to be handled further up the call
-                # stack
                 raise SystemExit("Snapshot aborted")
 
             print("Not valid")

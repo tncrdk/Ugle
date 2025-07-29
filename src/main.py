@@ -27,7 +27,10 @@ def checkout_handler(args) -> None:
     Returns:
         None
     """
-    checkout.checkout(vars(args).get("lock-file"), args.verbose)
+    args_dict = vars(args)
+    checkout.checkout(
+        args_dict.get("lock-file"), args_dict.get("destination"), args_dict.get("force"), args.verbose
+    )
 
 
 def snapshot_handler(args) -> None:
@@ -60,6 +63,12 @@ def main():
     # Checkout subcommand
     checkout_parser.add_argument(
         "lock-file", help="The lockfile to load the snapshot from"
+    )
+    checkout_parser.add_argument(
+        "-d", "--destination", help="Where to recreate the snapshot", required=False
+    )
+    checkout_parser.add_argument(
+        "-f", "--force", action="store_true", help="If target directories exist, they will be overwritten"
     )
     checkout_parser.add_argument(
         "-v", "--verbose", action="store_true", help="Verbose printing"

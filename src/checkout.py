@@ -15,17 +15,31 @@ from utils import verbose_print, check_if_file_exists
 # ====================================================================================
 
 
-def checkout(lockfile_path_str: str, verbose: bool = False):
-    """Checkout the projects as defined in the lock-file.
-    All local dependencies will be copied / recreated at `~/.ugle/`.
-    A spack.lock file will be created there as well if necessary
+def checkout(
+    lockfile_path_str: str,
+    destination_path_str: Optional[str],
+    force: bool = False,
+    verbose: bool = False,
+):
+    """
+    Checkout the projects as defined in the lock-file. A spack.lock
+    file will be created there as well if necessary
+    All local dependencies will be recreated
+    at `~/.ugle/` unless `destination_path_str` is supplied
 
     ---
     Args:
         lockfile_path_str : `str`
             The filepath to the lockfile we will use to load the snapshot from
 
-        verbose : `bool`, default 'False'
+        destination_path_str : `Optional[str]`
+            Alternative destination to recreate the snapshot. If not supplied, the snapshot
+            will be created at `~/.ugle/`
+
+        force : `bool`, default=False
+            If force is supplied, necessary files and folders will be overwritten for the checkout to succeed
+
+        verbose : `bool`, default=False
             Enable verbose printing
 
     ---
@@ -43,7 +57,7 @@ def checkout(lockfile_path_str: str, verbose: bool = False):
     exists, err_msg = check_if_file_exists(lockfile_path)
     if not exists:
         raise FileNotFoundError(err_msg)
-    verbose_print(verbose, f"Found lockfile at {lockfile_path}")
+    verbose_print(verbose, f"Found lockfile at {lockfile_path}\n")
     # Open the lockfile
     with open(lockfile_path, "r") as f:
         config = json.load(f)
@@ -55,20 +69,30 @@ def checkout(lockfile_path_str: str, verbose: bool = False):
     # Check if the TOML file exists
     exists, err_msg = check_if_file_exists(tomlfile_path)
     if exists:
-        verbose_print(verbose, f"Found TOML-file at {tomlfile_path}")
         # Open the TOML file if it exists
+        verbose_print(verbose, f"Found TOML-file at {tomlfile_path}")
         with open(tomlfile_path, "rb") as f:
             toml_config = tomllib.load(f)
     else:
-        verbose_print(verbose, f"Did not find TOML-file at {tomlfile_path}")
         # Default to empty dict if the TOML file does not exist
+        verbose_print(verbose, f"Did not find TOML-file at {tomlfile_path}")
         toml_config = dict()
 
     # Get the checkout directory where the snapshot will be rebuilt
     name: Optional[str] = config.get("name")
     if name is None:
         raise ValueError(f"'name' not found in {lockfile_path.name}")
-    checkout_dir = (Path("~/.ugle/") / name).expanduser().resolve()
+    # If a destination has been supplied, use it. Otherwise default to '~/.ugle/'
+    if destination_path_str is not None:
+        checkout_dir = Path(destination_path_str).expanduser().resolve()
+    else:
+        checkout_dir = (Path("~/.ugle/") / name).expanduser().resolve()
+
+    # Create the checkout directory
+    # If 'force' is supplied, it will overwrite necessary files
+    if checkout_dir.exists() and force:
+        shutil.rmtree(checkout_dir)
+    checkout_dir.mkdir(parents=True)  # Will raise an error if the folder exists
 
     verbose_print(verbose, "-" * 10)
 
@@ -79,25 +103,23 @@ def checkout(lockfile_path_str: str, verbose: bool = False):
     if deps is not None:
         load_deps(deps, toml_config, checkout_dir, commands, verbose)
 
-    # Make sure the snapshot directory exists
-    checkout_dir.mkdir(parents=True, exist_ok=True)
-
     # Run all the accumulated commands
     print()
     print("=" * 10)
     for dir, dep_cmds in commands.items():
-        print("-" * 5)
+        verbose_print(verbose, "-" * 5)
         # Make sure the directory exists
-        Path(dir).mkdir(parents=True, exist_ok=True)
+        Path(dir).mkdir(parents=True)
         os.chdir(dir)
         print(f"In: {dir}")
         for cmd in dep_cmds:
-            print("Running: ", " ".join(cmd))
+            verbose_print(verbose, "Running: " + " ".join(cmd))
             output = subprocess.run(cmd, capture_output=True)
             err = output.returncode
-            # If errors occured, print them
+            # If errors occured, print them and raise en exception
             if err != 0:
-                print("Error: ", err)
+                print(f"Error encountered in {dir} when running \n$ {" ".join(cmd)}")
+                raise Exception(err)
     print("=" * 10)
     print()
 
@@ -106,8 +128,8 @@ def checkout(lockfile_path_str: str, verbose: bool = False):
     # If there is a Spack env
     if spack_config is not None:
         spack_file = checkout_dir / "spack.lock"
-        # Check that we are not overwriting any files when creating the
-        # spack.lock file. If we are, append a uuid at the end.
+        # If the spack file already exists, we need to overwrite it to avoid
+        # getting the system into a limbo where nothing in the folder works.
         if spack_file.exists():
             verbose_print(verbose, f"Removing old spack.lock: {spack_file}")
             os.remove(spack_file)
@@ -168,7 +190,7 @@ def load_deps(
             }
             The commands are run in order from top to bottom at the specified filepath
 
-        verbose : `bool`, default 'False'
+        verbose : `bool`, default=False
             Enable verbose printing
 
     ---
@@ -211,7 +233,9 @@ def load_dep(
     commands: dict[str, list[list[str]]],
     verbose: bool = False,
 ):
-    """Checkout local dependency not installed by Spack
+    """
+    Checkout local dependency not installed by Spack.
+    Assumes that the checkout_dir does not have a direct subfolder named `dep_name`
 
     ---
     Args:
@@ -252,7 +276,7 @@ def load_dep(
             }
             The commands are run in order from top to bottom at the specified filepath
 
-        verbose : `bool`, default 'False'
+        verbose : `bool`, default=False
             Enable verbose printing
 
     ---
@@ -260,25 +284,18 @@ def load_dep(
         None
     """
     # Paths to check for the commit. The last one is the default location to
-    # clone in the git repo if the other two fails.
+    # clone in the git repo if the other two fails. Expects destination_path to
+    # be empty
     destination_path = checkout_dir / dep_name
     destination_path_str = str(destination_path)
     src = None
     commands[destination_path_str] = []
 
-    verbose_print(verbose, f"Looking for commit: {commit_hash}")
-    verbose_print(verbose, f"Looking in {destination_path}")
-
-    # If the directory already exists, check if commit can be found there
+    # If the `destination_path` exists, throw an error
     if destination_path.exists():
-        if commit_exists(destination_path, commit_hash):
-            # If the commit exists here, we don't have to do anything
-            verbose_print(verbose, f"Found commit at {destination_path}")
-            src = destination_path
-        else:
-            # If the commit can not be found, remove this directory
-            verbose_print(verbose, f"Commit not found. Will remove {destination_path}")
-            shutil.rmtree(destination_path)
+        raise FileExistsError(f"{destination_path} already exists. Can not continue")
+
+    verbose_print(verbose, f"Looking for commit: {commit_hash}")
 
     # If we did not find the commit there already, we need to search more
     # directories
