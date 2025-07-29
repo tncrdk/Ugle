@@ -8,29 +8,38 @@ from typing import Optional
 
 from utils import verbose_print, check_if_file_exists
 
+# TODO: Test to clone from private repos
 
 # ====================================================================================
 # Checkout
 # ====================================================================================
 
 
-def checkout(work_dir_str: str, verbose: bool = False):
+def checkout(lockfile_path_str: str, verbose: bool = False):
+    """Checkout the projects as defined in the lock-file.
+    All local dependencies will be copied / recreated at `~/.ugle/`.
+    A spack.lock file will be created there as well if necessary
+
+    ---
+    Args:
+        lockfile_path_str : `str`
+            The filepath to the lockfile we will use to load the snapshot from
+
+        verbose : `bool`, default 'False'
+            Enable verbose printing
+
+    ---
+    Returns:
+        None
+    """
     # Copy spack lockfile (if exists)
     # store commit hash and either url or filepath to all other deps
 
-    # Get the working directory for the snapshot
-    work_dir = Path(work_dir_str).resolve()
+    # Resolve the lockfile path
+    lockfile_path = Path(lockfile_path_str).expanduser().resolve()
 
-    # Check existence
-    if not work_dir.exists():
-        raise FileNotFoundError(f"{work_dir} does not exist")
-
-    # Create lockfile and TOML filepaths
-    lockfile_path = work_dir / "ugle.lock"
-    tomlfile_path = work_dir / "ugle.toml"
-
-    verbose_print(verbose, f"Looking for lockfile at {lockfile_path}")
     # Check if the lockfile exists
+    verbose_print(verbose, f"Looking for lockfile at {lockfile_path}")
     exists, err_msg = check_if_file_exists(lockfile_path)
     if not exists:
         raise FileNotFoundError(err_msg)
@@ -39,11 +48,8 @@ def checkout(work_dir_str: str, verbose: bool = False):
     with open(lockfile_path, "r") as f:
         config = json.load(f)
 
-    # Create the checkout directory where the snapshot will be rebuilt
-    name: Optional[str] = config.get("name")
-    if name is None:
-        raise ValueError("'name' not found")
-    checkout_dir = (Path("~/.ugle/") / name).expanduser().resolve().absolute()
+    # Create TOML filepath based on the lockfile
+    tomlfile_path = lockfile_path.with_suffix(".toml")
 
     verbose_print(verbose, f"Looking for TOML-file at {tomlfile_path}")
     # Check if the TOML file exists
@@ -58,6 +64,12 @@ def checkout(work_dir_str: str, verbose: bool = False):
         # Default to empty dict if the TOML file does not exist
         toml_config = dict()
 
+    # Get the checkout directory where the snapshot will be rebuilt
+    name: Optional[str] = config.get("name")
+    if name is None:
+        raise ValueError(f"'name' not found in {lockfile_path.name}")
+    checkout_dir = (Path("~/.ugle/") / name).expanduser().resolve()
+
     verbose_print(verbose, "-" * 10)
 
     # Commands to run when checking out the snapshot
@@ -65,7 +77,7 @@ def checkout(work_dir_str: str, verbose: bool = False):
 
     deps = config.get("deps")
     if deps is not None:
-        load_deps(deps, toml_config, work_dir, checkout_dir, commands, verbose)
+        load_deps(deps, toml_config, checkout_dir, commands, verbose)
 
     # Make sure the snapshot directory exists
     checkout_dir.mkdir(parents=True, exist_ok=True)
@@ -93,7 +105,7 @@ def checkout(work_dir_str: str, verbose: bool = False):
     spack_config = config.get("spack")
     # If there is a Spack env
     if spack_config is not None:
-        spack_file = checkout_dir / Path("spack.lock")
+        spack_file = checkout_dir / "spack.lock"
         # Check that we are not overwriting any files when creating the
         # spack.lock file. If we are, append a uuid at the end.
         if spack_file.exists():
@@ -119,11 +131,50 @@ def checkout(work_dir_str: str, verbose: bool = False):
 def load_deps(
     deps: dict[str, dict[str, str]],
     toml_config: dict,
-    work_dir: Path,
     checkout_dir: Path,
     commands: dict[str, list[list[str]]],
     verbose: bool = False,
 ):
+    """Checkout local dependencies not installed by Spack
+
+    ---
+    Args:
+        deps : `dict[str, dict[str, str]]`
+            The local dependencies to take snapshot of. Structured as
+            { <dep-name>: { "filepath": <filepath>, "url": <url>, ... }, ... }
+
+        toml_config : `dict`
+            Additional configuration supplied by the TOML-file. Is used in
+            case dependencies have been moved since the snapshot was created.
+
+        checkout_dir : `Path`
+            The directory where the snapshot will be recreated at.
+
+        commands : `dict[str, list[list[str]]]`
+            Commands to run when recreating the snapshot.
+            They are supplied to `subprocess.run()`. Structured as
+            {
+                <filepath_to_run_cmd_from>: [
+                    [<cmd>],
+                    [<cmd>],
+                    ...
+                ],
+                <filepath_to_run_cmd_from>: [
+                    [<cmd>],
+                    [<cmd>],
+                    ...
+                ],
+                ...
+            }
+            The commands are run in order from top to bottom at the specified filepath
+
+        verbose : `bool`, default 'False'
+            Enable verbose printing
+
+    ---
+    Returns:
+        None
+    """
     for dep_name, dep in deps.items():
         lock_filepath = Path(dep["filepath"])
         commit_hash = dep["hash"]
@@ -135,9 +186,7 @@ def load_deps(
         if toml_deps is not None:
             toml_dep = toml_deps.get(dep_name)
             if toml_dep is not None:
-                toml_filepath = (
-                    Path(toml_dep.get("filepath")).expanduser().resolve().absolute()
-                )
+                toml_filepath = Path(toml_dep.get("filepath")).expanduser().resolve()
 
         # Load the dependency
         load_dep(
@@ -146,7 +195,6 @@ def load_deps(
             toml_filepath,
             commit_hash,
             url,
-            work_dir,
             checkout_dir,
             commands,
             verbose,
@@ -159,11 +207,58 @@ def load_dep(
     tomlfile_path: Optional[Path],
     commit_hash: str,
     url: Optional[str],
-    work_dir: Path,
     checkout_dir: Path,
     commands: dict[str, list[list[str]]],
     verbose: bool = False,
 ):
+    """Checkout local dependency not installed by Spack
+
+    ---
+    Args:
+        dep_name : `str`
+            Name of the dependency to load
+
+        lockfile_path : `Path`
+            Filepath to dependency given by the lock-file
+
+        tomlfile_path : `Optional[Path]`
+            Filepath to dependency given by the TOML-file
+
+        commit_hash : `str`
+            The commit hash of the commit to checkout
+
+        url : `Optional[str]`
+            Git url of the dependency. If the repo with the specified
+            commit is not found locally, the repo will be cloned from the supplied url
+
+        checkout_dir : `Path`
+            The directory where the snapshot will be recreated at.
+
+        commands : `dict[str, list[list[str]]]`
+            Commands to run when recreating the snapshot.
+            They are supplied to `subprocess.run()`. Structured as
+            {
+                <filepath_to_run_cmd_from>: [
+                    [<cmd>],
+                    [<cmd>],
+                    ...
+                ],
+                <filepath_to_run_cmd_from>: [
+                    [<cmd>],
+                    [<cmd>],
+                    ...
+                ],
+                ...
+            }
+            The commands are run in order from top to bottom at the specified filepath
+
+        verbose : `bool`, default 'False'
+            Enable verbose printing
+
+    ---
+    Returns:
+        None
+    """
     # Paths to check for the commit. The last one is the default location to
     # clone in the git repo if the other two fails.
     destination_path = checkout_dir / dep_name
@@ -182,9 +277,7 @@ def load_dep(
             src = destination_path
         else:
             # If the commit can not be found, remove this directory
-            verbose_print(
-                verbose, f"Commit not found. Will remove {destination_path}"
-            )
+            verbose_print(verbose, f"Commit not found. Will remove {destination_path}")
             shutil.rmtree(destination_path)
 
     # If we did not find the commit there already, we need to search more
@@ -217,7 +310,6 @@ def load_dep(
             if commit_exists(destination_path, commit_hash):
                 # If the commit exists, move it to the destination directory
                 verbose_print(verbose, f"Commit found at {url}.")
-                found_commit = True
                 src = destination_path
             else:
                 # If the commit does not exist, remove the pulled repo
@@ -249,13 +341,25 @@ def load_dep(
 
     commands[destination_path_str].append(["git", "checkout", commit_hash])
 
-    # Change back to work_dir
-    os.chdir(work_dir)
-
     verbose_print(verbose, "-" * 10)
 
 
 def commit_exists(path: Path, commit_hash: str) -> bool:
+    """Check if the commit exists in a Git repo at the given filepath
+
+    ---
+    Args:
+        path : `Path`
+            The directory to search for the commit hash.
+
+        commit_hash : `str`
+            The commit hash of the commit to checkout
+    ---
+    Returns:
+        `bool`
+        True if the commit exists, False otherwise
+    """
+    # Get cwd, so we can return to it after the function has executed
     cwd = os.getcwd()
     os.chdir(path)
     if (

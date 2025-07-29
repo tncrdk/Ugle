@@ -9,40 +9,59 @@ from typing import Optional
 
 from utils import check_if_file_exists, create_absolute_path, verbose_print
 
+# TODO: Document exceptions
 
 # ====================================================================================
 # Snapshot
 # ====================================================================================
 
 
-def snapshot(work_dir_str: str, verbose: bool = False):
-    snapshot = dict()
-    work_dir = Path(work_dir_str).resolve()
+def snapshot(tomlfile_path_str: str, verbose: bool = False):
+    """Create snapshot from TOML-file
+
+    ---
+    Args:
+        tomlfile_path_str : `str`
+            Filepath to the TOML-file to load the snapshot from
+
+        verbose : `bool`, default 'False'
+            Enable verbose printing
+    ---
+    Returns:
+        None
+    """
     # Copy spack lockfile (if exists)
     # store commit hash and either url or filepath to all other deps
 
-    # Check existence
-    if not work_dir.exists():
-        raise FileNotFoundError(f"{work_dir} does not exist")
-    toml_file_path = work_dir / "ugle.toml"
-    exists, err_msg = check_if_file_exists(toml_file_path)
+    snapshot = dict()
+
+    # Resolve the TOML-file path
+    tomlfile_path = Path(tomlfile_path_str).expanduser().resolve()
+
+    # Check if TOML-file exists
+    verbose_print(verbose, f"Looking for TOML-file at {tomlfile_path}")
+    exists, err_msg = check_if_file_exists(tomlfile_path)
     if not exists:
         raise FileNotFoundError(err_msg)
-
-    with open(toml_file_path, "rb") as f:
+    verbose_print(verbose, f"Found TOML-file at {tomlfile_path}\n")
+    # Open the TOML-file if it exists
+    with open(tomlfile_path, "rb") as f:
         config = tomllib.load(f)
+
+    # Create the working directory, the directory where the TOML-file resides
+    work_dir = tomlfile_path.parent
 
     # Add the name of snapshot to the lockfile
     name = config.get("name")
     if name is None:
-        raise ValueError("'name' is missing from ugle.toml")
+        raise ValueError(f"The key 'name' is missing from {tomlfile_path.name}")
     date = str(datetime.date.today())
     snapshot["name"] = name + "-" + date
 
     # If there is a Spack entry, handle it
     spack_config = config.get("spack")
     if spack_config is not None:
-        spack_deps(spack_config, snapshot, work_dir, toml_file_path, verbose)
+        spack_deps(spack_config, snapshot, work_dir, tomlfile_path, verbose)
 
     # TODO: Handle current folder project
 
@@ -69,13 +88,36 @@ def spack_deps(
     spack_config: dict[str, str],
     snapshot: dict,
     work_dir: Path,
-    toml_file_path: Path,
+    tomlfile_path: Path,
     verbose: bool = False,
 ):
+    """Handle dependencies installed with Spack
+
+    ---
+    Args:
+        spack_config : `dict[str, str]`
+            The Spack config loaded from the TOML-file
+
+        snapshot : `dict`
+            The snapshot dictionary to be dumped. Will be modified inside the function
+
+        work_dir: `Path`
+            The parent directory of the TOML-file the current snapshot is based on
+
+        tomlfile_path: `Path`
+            Filepath to the TOML-file the current snapshot is based on
+
+        verbose: `bool`, default 'False'
+            Enable verbose printing
+
+    ---
+    Returns:
+        None
+    """
     # This should exist
     lockfile_str = spack_config.get("lockfile")
     if lockfile_str is None:
-        raise KeyError(f"No attribute called 'lockfile' in {toml_file_path}.")
+        raise KeyError(f"No attribute called 'lockfile' in {tomlfile_path}.")
     lockfile_path = Path(lockfile_str)
 
     # Resolves the path to an absolute path
@@ -85,8 +127,8 @@ def spack_deps(
     if not exists:
         raise FileNotFoundError(err_msg)
 
-    verbose_print(verbose, f"Loading contents of {lockfile_path}")
     # Extract the contents of the lockfile
+    verbose_print(verbose, f"Loading contents of {lockfile_path}")
     with open(lockfile_path, "r") as f:
         lockfile_content = json.load(f)
 
@@ -101,6 +143,27 @@ def handle_other_deps(
     work_dir: Path,
     verbose: bool = False,
 ):
+    """Handle local dependencies not installed by Spack
+
+    ---
+    Args:
+        deps : `dict[str, dict[str, str]]`
+            The local dependencies to take snapshot of. Structured as
+            { <dep-name>: { "filepath": <filepath>, "url": <url>, ... }, ... }
+
+        snapshot : `dict`
+            The snapshot dictionary to be dumped. Will be modified inside the function
+
+        work_dir: `Path`
+            The parent directory of the TOML-file the current snapshot is based on
+
+        verbose : `bool`, default 'False'
+            Enable verbose printing
+
+    ---
+    Returns:
+        None
+    """
     # deps structure:
     # deps = { <dep-name>: {filepath: <file>, url: <url>}, <dep-2>: {filepath: <file>, url: <url>}}
     snapshot["deps"] = dict()
@@ -124,8 +187,31 @@ def local_dep(
     url: Optional[str],
     verbose: bool = False,
 ):
-    """
-    Expected to be a local git repo
+    """Add local dependency to the snapshot dictionary. The dependency is assumed to be a local git repo.
+
+    ---
+    Args:
+        name : `str`
+            Name of the dependency
+
+        filepath_str : `str`
+            The filepath to the dependency
+
+        snapshot : `dict`
+            The snapshot dictionary to be dumped. Will be modified inside the function
+
+        work_dir: `Path`
+            The parent directory of the TOML-file the current snapshot is based on
+
+        url : `Optional[str]`
+            The git url for the dependency, if it exists
+
+        verbose : `bool`, default 'False'
+            Enable verbose printing
+
+    ---
+    Returns:
+        None
     """
     filepath = create_absolute_path(Path(filepath_str), work_dir)
     verbose_print(verbose, "=" * 10)

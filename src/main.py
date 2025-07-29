@@ -16,31 +16,59 @@ import checkout
 
 
 def checkout_handler(args) -> None:
-    checkout.checkout(args.work_dir, args.verbose)
+    """Extract the necessary information to checkout a snapshot
+
+    --
+    Args:
+        args : Namespace
+            The `Namespace` object returned by `parse_args()`
+
+    ---
+    Returns:
+        None
+    """
+    checkout.checkout(vars(args).get("lock-file"), args.verbose)
 
 
 def snapshot_handler(args) -> None:
-    snapshot.snapshot(args.work_dir, args.verbose)
+    """Extract the necessary information to perform a snapshot
+
+    --
+    Args:
+        args : Namespace
+            The `Namespace` object returned by `parse_args()`
+
+    ---
+    Returns:
+        None
+    """
+    snapshot.snapshot(vars(args).get("TOML-file"), args.verbose)
 
 
 def main():
-    parser = argparse.ArgumentParser("Ugle", description="Create and retrieve snapshot")
+    """
+    Create the cmd-line parser and parse arguments supplied while running this file.
+    """
+    parser = argparse.ArgumentParser(
+        "Ugle", description="Create and retrieve snapshots"
+    )
     # work_dir is the "root" of the snapshot.
-    # parser.add_argument("work_dir", help="The directory where the ugle.toml file is located.")
     subparsers = parser.add_subparsers()
     checkout_parser = subparsers.add_parser("checkout")
     snapshot_parser = subparsers.add_parser("snapshot")
-    #
+
+    # Checkout subcommand
     checkout_parser.add_argument(
-        "work_dir", help="The directory where the ugle.toml file is located."
+        "lock-file", help="The lockfile to load the snapshot from"
     )
     checkout_parser.add_argument(
         "-v", "--verbose", action="store_true", help="Verbose printing"
     )
     checkout_parser.set_defaults(func=checkout_handler)
 
+    # Snapshot subcommand
     snapshot_parser.add_argument(
-        "work_dir", help="The directory where the ugle.toml file is located."
+        "TOML-file", help="The TOML-file to create the snapshot from"
     )
     snapshot_parser.add_argument(
         "-v", "--verbose", action="store_true", help="Verbose printing"
@@ -48,9 +76,6 @@ def main():
     snapshot_parser.set_defaults(func=snapshot_handler)
 
     args = parser.parse_args()
-    # print(args.work_dir)
-    # snapshot.snapshot(args.work_dir, verbose=True)
-    # checkout.checkout(args.work_dir, verbose=True)
     args.func(args)
 
 
