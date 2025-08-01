@@ -1,6 +1,5 @@
 import tomllib
 import datetime
-import os
 import re
 import subprocess
 import json
@@ -9,7 +8,6 @@ from typing import Optional
 
 from utils import check_if_file_exists, create_absolute_path, verbose_print
 
-# TODO: Better printing
 
 # ====================================================================================
 # Snapshot
@@ -37,6 +35,7 @@ def snapshot(tomlfile_path_str: str, verbose: bool = False):
 
     # Resolve the TOML-file path
     tomlfile_path = Path(tomlfile_path_str).expanduser().resolve()
+    lockfile_path = tomlfile_path.with_suffix(".lock")
 
     # Check if TOML-file exists
     verbose_print(verbose, f"Looking for TOML-file at {tomlfile_path}")
@@ -75,13 +74,13 @@ def snapshot(tomlfile_path_str: str, verbose: bool = False):
 
     handle_other_deps(deps, snapshot, work_dir, verbose)
 
-    os.chdir(work_dir)
-    with open("ugle.lock", "w") as f:
+    with open(lockfile_path, "w") as f:
         json.dump(snapshot, f)
 
     print()
-    # print("#" * 10)
-    print("DONE!")
+    print("#" * 60)
+    print(f"Snapshot stored in {lockfile_path}")
+    print("#" * 60)
 
 
 def spack_deps(
@@ -91,7 +90,8 @@ def spack_deps(
     tomlfile_path: Path,
     verbose: bool = False,
 ):
-    """Handle dependencies installed with Spack
+    """
+    Handle dependencies installed with Spack
 
     ---
     Args:
@@ -187,7 +187,8 @@ def local_dep(
     url: Optional[str],
     verbose: bool = False,
 ):
-    """Add local dependency to the snapshot dictionary. The dependency is assumed to be a local git repo.
+    """
+    Add local dependency to the snapshot dictionary. The dependency is assumed to be a local git repo.
 
     ---
     Args:
@@ -214,54 +215,56 @@ def local_dep(
         None
     """
     filepath = create_absolute_path(Path(filepath_str), work_dir)
-    verbose_print(verbose, "=" * 10)
-    verbose_print(verbose, f"Looking for {name} in {filepath}")
+    print()
+    print("=" * 10)
+    print(f"{name.upper()}: ")
+    print(f"Looking for {name} in {filepath}")
     if not filepath.exists():
         raise FileNotFoundError(f"Filepath {filepath} does not exist")
-    os.chdir(filepath)
+    if not filepath.is_dir():
+        raise Exception(f"Filepath {filepath} is not a directory")
 
-    git_status = subprocess.run(["git", "status", "--porcelain"], capture_output=True)
+    git_status = subprocess.run(
+        ["git", "status", "--porcelain"], capture_output=True, cwd=filepath
+    )
     # If something goes wrong with the above command, it needs to be fixed
     # outside the script
     if not git_status.returncode == 0:
-        raise Exception(git_status.stderr.decode() + f"\n\nEncountered while processing {name} at {filepath}")
+        raise Exception(
+            git_status.stderr.decode()
+            + f"\n\nEncountered while processing {name} at {filepath}"
+        )
 
-    verbose_print(verbose, "-" * 4)
+    verbose_print(verbose, "" * 4)
     verbose_print(verbose, "Checking the working tree")
     if git_status.stdout.decode() != "":
+        print("*" * 90)
+        print("WARNING!")
         print(f"The working tree of {filepath} is not clean:")
         print(git_status.stdout.decode())
-        # TODO: Maybe remove the TUI-part, and just print a warning
-        while True:
-            print(
-                "Do you want to continue creating a snapshot? Note that only committed changes will be added to the snapshot."
-            )
-            ans = input("[y/n]: ").strip()
-            if ans == "y":
-                break
-            elif ans == "n":
-                raise SystemExit("Snapshot aborted")
-
-            print("Not valid")
+        print("NOTE: Only committed changes will be added to the snapshot.")
+        print("*" * 90)
     else:
         verbose_print(verbose, "Working tree is clean")
 
-    verbose_print(verbose, "-" * 4)
+    verbose_print(verbose, "" * 4)
     verbose_print(verbose, "Getting commit-hash")
     # Get the commit-hash of the commit currently being check out
     commit_hash = (
-        subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True)
+        subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, cwd=filepath)
         .stdout.decode()
         .strip()
     )
     verbose_print(verbose, f"Commit-hash: {commit_hash}")
-    verbose_print(verbose, "-" * 4)
+    verbose_print(verbose, "" * 4)
 
     # If url is not defined, try to get it from 'git remove -v'
     if url is None:
         verbose_print(verbose, "Trying to get url with 'git remote -v'")
 
-        remote_cmd = subprocess.run(["git", "remote", "-v"], capture_output=True)
+        remote_cmd = subprocess.run(
+            ["git", "remote", "-v"], capture_output=True, cwd=filepath
+        )
         # Regex for getting the remote url. We pick the push url since this is
         # most likely to contain new updates
         url_remote_cmd = re.findall(
@@ -279,8 +282,8 @@ def local_dep(
     else:
         verbose_print(verbose, f"url: {url}")
 
-    verbose_print(verbose, f"-" * 4)
-    verbose_print(verbose, f"Adding {name} to snapshot")
+    verbose_print(verbose, f"" * 4)
+    print(f"Adding {name} to snapshot")
 
     # If there a url exists, add it to the lockfile
     if url is not None:

@@ -7,8 +7,6 @@ import checkout
 
 # TODO: Snapshot which spack repos packages are coming from?
 
-# TODO: Improve error handling
-
 
 # ====================================================================================
 # Program

@@ -110,11 +110,10 @@ def checkout(
         verbose_print(verbose, "-" * 5)
         # Make sure the directory exists
         Path(dir).mkdir(parents=True)
-        os.chdir(dir)
         print(f"In: {dir}")
         for cmd in dep_cmds:
             verbose_print(verbose, "Running: " + " ".join(cmd))
-            output = subprocess.run(cmd, capture_output=True)
+            output = subprocess.run(cmd, capture_output=True, cwd=dir)
             err = output.returncode
             # If errors occured, print them and raise en exception
             if err != 0:
@@ -339,12 +338,11 @@ def load_dep(
         # TODO: Improve error msg
         raise Exception("The commit could not be found")
 
-    # Make sure we are in the source location
-    os.chdir(src)
-
     # Get 'git status' but ignoring untracked files
     git_status = subprocess.run(
-        ["git", "status", "--porcelain", "--untracked-files=no"], capture_output=True
+        ["git", "status", "--porcelain", "--untracked-files=no"],
+        capture_output=True,
+        cwd=src,
     ).stdout.decode()
     if not git_status == "":
         # Remove all non-committed changes and untracked files
@@ -377,16 +375,11 @@ def commit_exists(path: Path, commit_hash: str) -> bool:
         True if the commit exists, False otherwise
     """
     # Get cwd, so we can return to it after the function has executed
-    cwd = os.getcwd()
-    os.chdir(path)
     if (
         subprocess.run(
-            ["git", "cat-file", "commit", commit_hash], capture_output=True
+            ["git", "cat-file", "commit", commit_hash], capture_output=True, cwd=path
         ).stderr.decode()
         == ""
     ):
-        os.chdir(cwd)
         return True
-
-    os.chdir(cwd)
     return False

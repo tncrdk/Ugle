@@ -8,8 +8,7 @@ from pathlib import Path
 
 def check_if_file_exists(filename: Path) -> tuple[bool, str]:
     """Check if file exists (as a file)
-
-    ---
+---
     Args:
         filename : `Path`
             The filename to check the existence of
