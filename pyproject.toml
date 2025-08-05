@@ -14,7 +14,7 @@ classifiers = [
     "Intended Audience :: Science/Research",
 ]
 license = "MIT"
-license-files = ["LICEN[CS]E*"]
+license-files = ["LICENSE"]
 
 [project.urls]
 Homepage = "https://github.com/tncrdk/Ugle"
