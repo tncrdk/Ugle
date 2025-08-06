@@ -321,6 +321,7 @@ def load_dep(
 
             # Clone the repo
             verbose_print(verbose, f"Cloning from {url} into {destination_path}")
+            # TODO: This can fail (no repo / no internet / etc)
             subprocess.run(["git", "clone", url, destination_path])
 
             if commit_exists(destination_path, commit_hash):
