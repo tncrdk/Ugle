@@ -10,13 +10,15 @@ from typing import Optional
 from utils import verbose_print, check_if_file_exists
 
 # TODO: If apt-cache | dpkg-repack is not a command, it will throw an error (FileNotFoundError)
+# TODO: Use lsb_release to get the ubuntu version
 
 
-def get_apt_installed_packages(
-    packages: list[str], tomlfile_path: Path, snapshot: dict, verbose: bool = False
-):
+def repack_apt_installed_packages(
+    packages: list[str], archive_dir: Path, snapshot: dict, verbose: bool = False
+) -> Path:
     # Create a unique target directory to save the .deb files in
-    apt_dir = Path(tomlfile_path.stem + "-" + str(uuid.uuid4())).resolve()
+    apt_dir = archive_dir / "apt"
+    # Should not exist, artifact from earlier implementation
     if apt_dir.exists():
         verbose_print(verbose, f"{apt_dir} already exists. Removing it")
         shutil.rmtree(apt_dir)
@@ -25,34 +27,32 @@ def get_apt_installed_packages(
 
     processed_packages = set()
     failed_packages: list[tuple[str, str]] = []
-    while len(packages) > 0:
-        package = packages[0]
-        # Remove the package from the list
-        packages.pop(0)
+
+    for package in packages:
+        print("-" * 10)
 
         # If we have processed this package before, skip it this time
         if package in processed_packages:
             continue
 
-        # Repack the local dependency and store the package in target_dir
-        verbose_print(verbose, f"Adding {package}")
-        output = subprocess.run(
-            ["dpkg-repack", package], capture_output=True, cwd=apt_dir
-        )
-        err = output.stderr.decode()
-        # In case of an error, don't throw it, but store it.
-        if err != "":
-            # TODO: Improve error handling, warnings are printed as stderr
-            print(f"{package} could not be added")
-            failed_packages.append((package, err))
-
-        print(output.stdout.decode())
-        # Add package to the set of processed packages
-        processed_packages.add(package)
-
         # Get the dependencies of the package
         verbose_print(verbose, f"Checking dependencies of {package}")
-        output = subprocess.run(["apt-cache", "depends", package], capture_output=True)
+        output = subprocess.run(
+            [
+                "apt-cache",
+                "depends",
+                "--installed",  # Only show packages actually installed on the system
+                "--recurse",  # Recursive down through dependencies
+                # Remove all non-essential dependencies
+                "--no-suggests",
+                "--no-breaks",
+                "--no-replaces",
+                "--no-enhances",
+                "--no-conflicts",
+                package,
+            ],
+            capture_output=True,
+        )
         if output.returncode != 0:
             # TODO: Improve error handling
             print(f"Getting the dependencies of {package} failed:")
@@ -60,10 +60,18 @@ def get_apt_installed_packages(
             continue
 
         output_str = output.stdout.decode()
-        # '(?:Pre)?Depends' to include both PreDepends and Depends
-        dependencies = re.findall(r"(?:Pre)?Depends: (.*)\n", output_str, re.MULTILINE)
-        # Concatenate the new-found dependencies with the packages list
-        packages = dependencies + packages
+        # Regex for finding all dependencies (including recommends as these are
+        # also installed by default)
+        deps = re.findall(
+            r"(?:(?:Depends)|(?:PreDepends)|(?:Recommends)): (.*)\n",
+            output_str,
+            re.MULTILINE,
+        )
+        # Add the main package as well so that we run dpkg-repack on it as well
+        deps.append(package)
+
+        # Run dpkg-repack on all the packages
+        repack_packages(deps, apt_dir, processed_packages, failed_packages, verbose)
 
     # Init the subdictionary
     snapshot["apt"] = dict()
@@ -79,11 +87,44 @@ def get_apt_installed_packages(
     # Remove the temporary directory after zipping everything (Add it to
     # command_list?)
     # shutil.rmtree(apt_dir)
+    return apt_dir
+
+
+def repack_packages(
+    packages: list[str],
+    apt_dir: Path,
+    processed_packages: set[str],
+    failed_packages: list[tuple[str, str]],
+    verbose: bool = False,
+):
+    for package in packages:
+        if package in processed_packages:
+            continue
+        verbose_print(verbose, f"Adding {package}")
+        output = subprocess.run(
+            ["dpkg-repack", package], capture_output=True, cwd=apt_dir
+        )
+        err = output.stderr.decode()
+        # In case of an error, don't throw it, but store it.
+        if err != "":
+            # TODO: Improve error handling, warnings are printed as stderr
+            print(f"{package} could not be added:")
+            print(err)
+            failed_packages.append((package, err))
+        else:
+            print(output.stdout.decode())
+        # Add package to the set of processed packages
+        processed_packages.add(package)
 
 
 if __name__ == "__main__":
     snapshot = dict()
-    get_apt_installed_packages(
-        ["python3"], Path("ugle.toml").resolve(), snapshot, verbose=True
+    apt_dir = repack_apt_installed_packages(
+        ["cmake", "python3", "libgotools-core-dev"],
+        # ["tzdata"],
+        Path("ugle.toml").resolve(),
+        snapshot,
+        verbose=True,
     )
+    print(apt_dir)
     print(snapshot)

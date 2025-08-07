@@ -16,7 +16,7 @@ from utils import verbose_print, check_if_file_exists
 
 
 def checkout(
-    lockfile_path_str: str,
+    zipfile_path_str: str,
     destination_path_str: Optional[str],
     force: bool = False,
     verbose: bool = False,
@@ -29,8 +29,8 @@ def checkout(
 
     ---
     Args:
-        lockfile_path_str : `str`
-            The filepath to the lockfile we will use to load the snapshot from
+        zipfile_path_str : `str`
+            The filepath to the zipfile we will load the snapshot from
 
         destination_path_str : `Optional[str]`
             Alternative destination to recreate the snapshot. If not supplied, the snapshot
@@ -46,11 +46,36 @@ def checkout(
     Returns:
         None
     """
-    # Copy spack lockfile (if exists)
-    # store commit hash and either url or filepath to all other deps
+    zipfile_path = Path(zipfile_path_str).expanduser().resolve()
+    # Check if the zipfile exists
+    verbose_print(verbose, f"Looking for zipfile at {zipfile_path}")
+    exists, err_msg = check_if_file_exists(zipfile_path)
+    if not exists:
+        raise FileNotFoundError(err_msg)
+    verbose_print(verbose, f"Found zipfile at {zipfile_path}")
+
+    # Get the checkout directory where the snapshot will be rebuilt
+    name = zipfile_path.stem
+    # If a destination has been supplied, use it. Otherwise default to '~/.ugle/'
+    if destination_path_str is not None:
+        checkout_dir = Path(destination_path_str).expanduser().resolve()
+    else:
+        checkout_dir = (Path("~/.ugle/") / name).expanduser().resolve()
+
+    # Create the checkout directory
+    # If 'force' is supplied, it will overwrite necessary files
+    if checkout_dir.exists():
+        if force:
+            shutil.rmtree(checkout_dir)
+        else:
+            raise ValueError(f"{checkout_dir} already exists. Aborting")
+
+    # Unpack the zipfile
+    verbose_print(verbose, f"Unzipping {zipfile_path}")
+    shutil.unpack_archive(zipfile_path, extract_dir=checkout_dir)
 
     # Resolve the lockfile path
-    lockfile_path = Path(lockfile_path_str).expanduser().resolve()
+    lockfile_path = checkout_dir / "ugle.lock"
 
     # Check if the lockfile exists
     verbose_print(verbose, f"Looking for lockfile at {lockfile_path}")
@@ -65,8 +90,8 @@ def checkout(
     # Create TOML filepath based on the lockfile
     tomlfile_path = lockfile_path.with_suffix(".toml")
 
-    verbose_print(verbose, f"Looking for TOML-file at {tomlfile_path}")
     # Check if the TOML file exists
+    verbose_print(verbose, f"Looking for TOML-file at {tomlfile_path}")
     exists, err_msg = check_if_file_exists(tomlfile_path)
     if exists:
         # Open the TOML file if it exists
@@ -77,22 +102,6 @@ def checkout(
         # Default to empty dict if the TOML file does not exist
         verbose_print(verbose, f"Did not find TOML-file at {tomlfile_path}")
         toml_config = dict()
-
-    # Get the checkout directory where the snapshot will be rebuilt
-    name: Optional[str] = config.get("name")
-    if name is None:
-        raise ValueError(f"'name' not found in {lockfile_path.name}")
-    # If a destination has been supplied, use it. Otherwise default to '~/.ugle/'
-    if destination_path_str is not None:
-        checkout_dir = Path(destination_path_str).expanduser().resolve()
-    else:
-        checkout_dir = (Path("~/.ugle/") / name).expanduser().resolve()
-
-    # Create the checkout directory
-    # If 'force' is supplied, it will overwrite necessary files
-    if checkout_dir.exists() and force:
-        shutil.rmtree(checkout_dir)
-    checkout_dir.mkdir(parents=True)  # Will raise an error if the folder exists
 
     verbose_print(verbose, "-" * 10)
 
@@ -121,6 +130,10 @@ def checkout(
                 raise Exception(err)
     print("=" * 10)
     print()
+    verbose_print(verbose, f"Checking for Apt dependencies")
+    if config.get("apt") is not None:
+        docker_content = f"""
+        """
 
     verbose_print(verbose, f"Checking for Spack dependencies")
     spack_config = config.get("spack")

@@ -1,12 +1,17 @@
+import shutil
 import tomllib
 import datetime
 import re
 import subprocess
 import json
+import uuid
+import zipfile
+import os
 from pathlib import Path
 from typing import Optional
 
 from utils import check_if_file_exists, create_absolute_path, verbose_print
+from apt_deps import repack_apt_installed_packages
 
 
 # ====================================================================================
@@ -35,7 +40,6 @@ def snapshot(tomlfile_path_str: str, verbose: bool = False):
 
     # Resolve the TOML-file path
     tomlfile_path = Path(tomlfile_path_str).expanduser().resolve()
-    lockfile_path = tomlfile_path.with_suffix(".lock")
 
     # Check if TOML-file exists
     verbose_print(verbose, f"Looking for TOML-file at {tomlfile_path}")
@@ -47,15 +51,22 @@ def snapshot(tomlfile_path_str: str, verbose: bool = False):
     with open(tomlfile_path, "rb") as f:
         config = tomllib.load(f)
 
-    # Create the working directory, the directory where the TOML-file resides
+    # Set the working directory, the directory where the TOML-file resides
     work_dir = tomlfile_path.parent
+
+    # Create a temporary directory to use as the root of the zip-archive while
+    # creating it
+    archive_dir = work_dir / ("tmp-" + str(uuid.uuid4()))
+    os.mkdir(archive_dir)
+
+    # Set the lockfile-path
+    lockfile_path = archive_dir / "ugle.lock"
 
     # Add the name of snapshot to the lockfile
     name = config.get("name")
     if name is None:
         raise ValueError(f"The key 'name' is missing from {tomlfile_path.name}")
-    date = str(datetime.date.today())
-    snapshot["name"] = name + "-" + date
+    snapshot["name"] = name
 
     # If there is a Spack entry, handle it
     spack_config = config.get("spack")
@@ -74,12 +85,53 @@ def snapshot(tomlfile_path_str: str, verbose: bool = False):
 
     handle_other_deps(deps, snapshot, work_dir, verbose)
 
+    # Create the lockfile and store the snapshot in it
     with open(lockfile_path, "w") as f:
         json.dump(snapshot, f)
 
+    # Handle apt installed packages
+    apt_packages = config.get("apt")
+    if apt_packages is not None:
+        repack_apt_installed_packages(apt_packages, archive_dir, snapshot)
+
+    # Copy the TOML-file into the archive
+    shutil.copyfile(tomlfile_path, archive_dir / "ugle.toml")
+
+    date = str(datetime.date.today())
+    name = name + "-" + date
+    zip_path = work_dir / f"{name}"
+    zip_file = zip_path.with_suffix(".zip")
+
+    # If the zip-file already exists, overwrite it
+    if zip_file.exists():
+        print(f"{zip_file} already exists. Will overwrite")
+        os.remove(zip_file)
+
+    # TODO: Error handling
+    verbose_print(verbose, f"Creating zip-file at {zip_file}")
+    shutil.make_archive(str(zip_path), format="zip", root_dir=str(archive_dir))
+
+    # Delete the archive_dir
+    verbose_print(verbose, "Cleaning up")
+    shutil.rmtree(archive_dir)
+
+    # zip_output = subprocess.run(
+    #     [
+    #         "zip",
+    #         "-r",
+    #         zip_file,
+    #         str(tomlfile_path.name),
+    #         str(lockfile_path.name),
+    #         str(apt_dir.name),
+    #     ],
+    #     cwd=work_dir,
+    #     capture_output=True,
+    # )
+    # verbose_print(verbose, zip_output.stdout.decode())
+
     print()
     print("#" * 60)
-    print(f"Snapshot stored in {lockfile_path}")
+    print(f"Snapshot stored in {zip_path}.zip")
     print("#" * 60)
 
 
