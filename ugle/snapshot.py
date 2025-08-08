@@ -112,22 +112,8 @@ def snapshot(tomlfile_path_str: str, verbose: bool = False):
     shutil.make_archive(str(zip_path), format="zip", root_dir=str(archive_dir))
 
     # Delete the archive_dir
-    verbose_print(verbose, "Cleaning up")
+    verbose_print(verbose, f"Cleaning up {archive_dir}")
     shutil.rmtree(archive_dir)
-
-    # zip_output = subprocess.run(
-    #     [
-    #         "zip",
-    #         "-r",
-    #         zip_file,
-    #         str(tomlfile_path.name),
-    #         str(lockfile_path.name),
-    #         str(apt_dir.name),
-    #     ],
-    #     cwd=work_dir,
-    #     capture_output=True,
-    # )
-    # verbose_print(verbose, zip_output.stdout.decode())
 
     print()
     print("#" * 60)
