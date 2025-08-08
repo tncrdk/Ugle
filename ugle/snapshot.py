@@ -92,7 +92,7 @@ def snapshot(tomlfile_path_str: str, verbose: bool = False):
     # Handle apt installed packages
     apt_packages = config.get("apt")
     if apt_packages is not None:
-        repack_apt_installed_packages(apt_packages, archive_dir, snapshot)
+        repack_apt_installed_packages(apt_packages, archive_dir, snapshot, verbose)
 
     # Copy the TOML-file into the archive
     shutil.copyfile(tomlfile_path, archive_dir / "ugle.toml")
