@@ -93,10 +93,16 @@ def snapshot(tomlfile_path_str: str, verbose: bool = False):
     apt_packages = config.get("apt")
     if apt_packages is not None:
         repack_apt_installed_packages(apt_packages, archive_dir, snapshot, verbose)
+        # Copy the install script to the apt-folder
+        shutil.copyfile(
+            Path(__file__).parent / "exports" / "install.sh",
+            archive_dir / "apt" / "install.sh",
+        )
 
     # Copy the TOML-file into the archive
     shutil.copyfile(tomlfile_path, archive_dir / "ugle.toml")
 
+    # Create filename for zip-file
     date = str(datetime.date.today())
     name = name + "-" + date
     zip_path = work_dir / f"{name}"
@@ -335,3 +341,32 @@ def local_dep(
             "filepath": str(filepath),
             "hash": commit_hash,
         }
+
+
+def create_dockerfile(snapshot: dict, work_dir: Path, verbose: bool = False):
+    # TODO: Create docker-compose as well
+
+    # Create the path to the local exports folder
+    local_exports_path = Path(__file__).parent / "exports"
+    # Retrieve head and tail of Dockerfile
+    # (Everything except the volume-declarations)
+    with open(local_exports_path / "Dockerfile-head.txt", "r") as f:
+        docker_head = f.read()
+    with open(local_exports_path / "Dockerfile-tail.txt", "r") as f:
+        docker_tail = f.read()
+
+    dep_filepaths = []
+    deps = snapshot.get("deps")
+    if deps is None:
+        # If there are no deps, concatenate head and tail
+        snapshot["docker"] = docker_head + docker_tail
+        return
+
+    # Get the filepaths of the dependencies
+    for value in deps.values():
+        dep_filepaths.append(Path(value.get("filepath")))
+
+    volume_declaration = []
+    for path in dep_filepaths:
+        volume_declaration.append(f"VOLUME /home/Code/{path.name}")
+        # TODO: Insert filepath into docker-compose file as well

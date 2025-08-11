@@ -1,0 +1,21 @@
+services:
+  benchmark:
+    image: bench-v1:latest # Use your snapshot image
+    container_name: Benchmark # A friendly name for your container
+    volumes:
+      # Mount your host project code into the container
+      - .:/home/ubuntu/Code/benchmark:delegated # ':delegated' for better performance on macOS/Windows, optional on Linux
+      - /home/thorb/Code/Sandkasse/Benchmarking/disk/:/home/ubuntu/Code/disk:delegated
+      - /home/thorb/Code/Sandkasse/Benchmarking/memory/:/home/ubuntu/Code/memory:delegated
+      - /home/thorb/Code/Sandkasse/Benchmarking/arithmetic/:/home/ubuntu/Code/arithmetic:delegated
+      - /home/thorb/Code/Sandkasse/Benchmarking/parallel/:/home/ubuntu/Code/parallel:delegated
+      # Mount your host config files if they need to be dynamic or frequently changed outside of the snapshot
+      # - ./config:/home/developer/.config # Adjust path as needed
+      # Mount for persistence if you have a database or other data
+      # - dev_data:/home/developer/data
+    stdin_open: true # Keep stdin open for interactive processes
+    tty: true        # Allocate a pseudo-TTY
+
+# volumes:
+#   dev_data:
+#   dev_db_data:
