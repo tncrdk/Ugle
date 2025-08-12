@@ -1,0 +1,9 @@
+services:
+  <name of service>:
+    image: <name of built image>:latest # Use your snapshot image
+    container_name: <Name of container> # A friendly name for your container
+    stdin_open: true # Keep stdin open for interactive processes
+    tty: true        # Allocate a pseudo-TTY
+    volumes:
+      # Mount your host project code into the container
+

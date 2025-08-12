@@ -6,6 +6,7 @@ import snapshot
 import checkout
 
 # TODO: Snapshot which spack repos packages are coming from?
+# TODO: Make the program clean up after itself regardsless of errors thrown
 
 
 # ====================================================================================

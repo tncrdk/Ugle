@@ -1,4 +1,5 @@
 name = "Example"
+apt = [<package_1>, <package_2>, ...]
 
 [spack]
 lockfile = <spack lock-file path>
