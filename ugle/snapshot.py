@@ -5,7 +5,6 @@ import re
 import subprocess
 import json
 import uuid
-import zipfile
 import os
 from pathlib import Path
 from typing import Optional
@@ -84,6 +83,9 @@ def snapshot(tomlfile_path_str: str, verbose: bool = False):
     #     deps["work_dir"] = {"filepath": "."}
 
     handle_other_deps(deps, snapshot, work_dir, verbose)
+
+    # Get docker-helpers
+    load_docker_helpers(snapshot, verbose)
 
     # Create the lockfile and store the snapshot in it
     with open(lockfile_path, "w") as f:
@@ -343,9 +345,7 @@ def local_dep(
         }
 
 
-def create_dockerfile(snapshot: dict, work_dir: Path, verbose: bool = False):
-    # TODO: Create docker-compose as well
-
+def load_docker_helpers(snapshot: dict, verbose: bool = False):
     # Create the path to the local exports folder
     local_exports_path = Path(__file__).parent / "exports"
     # Retrieve head and tail of Dockerfile
@@ -354,19 +354,10 @@ def create_dockerfile(snapshot: dict, work_dir: Path, verbose: bool = False):
         docker_head = f.read()
     with open(local_exports_path / "Dockerfile-tail.txt", "r") as f:
         docker_tail = f.read()
+    # Get the docker-compose helper
+    with open(local_exports_path / "docker-compose.yaml", "r") as f:
+        docker_compose = f.read()
 
-    dep_filepaths = []
-    deps = snapshot.get("deps")
-    if deps is None:
-        # If there are no deps, concatenate head and tail
-        snapshot["docker"] = docker_head + docker_tail
-        return
-
-    # Get the filepaths of the dependencies
-    for value in deps.values():
-        dep_filepaths.append(Path(value.get("filepath")))
-
-    volume_declaration = []
-    for path in dep_filepaths:
-        volume_declaration.append(f"VOLUME /home/Code/{path.name}")
-        # TODO: Insert filepath into docker-compose file as well
+    snapshot["dockerhead"] = docker_head
+    snapshot["dockertail"] = docker_tail
+    snapshot["docker-compose"] = docker_compose

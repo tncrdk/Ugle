@@ -131,9 +131,9 @@ def checkout(
     print("=" * 10)
     print()
     verbose_print(verbose, f"Checking for Apt dependencies")
-    if config.get("apt") is not None:
-        docker_content = f"""
-        """
+
+    # Create necessary dockerfiles
+    create_dockerfiles(config, checkout_dir, verbose)
 
     verbose_print(verbose, f"Checking for Spack dependencies")
     spack_config = config.get("spack")
@@ -160,6 +160,17 @@ def checkout(
         print(f"$ spack env create <name> {spack_file.name}")
         print(f"$ spack env activate <name>")
         print("$ spack install")
+
+    # Print instructions for Docker
+    print()
+    print("#" * 60)
+    print("To run the Docker-container:")
+    print("#" * 60)
+    print(f"$ cd {checkout_dir}")
+    print(f"$ docker build . -t <image name>")
+    print(f"- Update docker-compose.yaml with the correct names")
+    print(f"$ docker compose up -d")
+    print("$ docker compose exec <service name> bash")
 
 
 def load_deps(
@@ -396,3 +407,51 @@ def commit_exists(path: Path, commit_hash: str) -> bool:
     ):
         return True
     return False
+
+
+def create_dockerfiles(snapshot: dict, checkout_dir: Path, verbose: bool = False):
+    # TODO: Create docker-compose as well
+    # tab indent = 6
+
+    # Create the path to the local exports folder
+    local_exports_path = Path(__file__).parent / "exports"
+
+    # Get head and tail of Dockerfile
+    # (Everything except the volume-declarations)
+    with open(local_exports_path / "Dockerfile-head.txt", "r") as f:
+        docker_head = f.read()
+    with open(local_exports_path / "Dockerfile-tail.txt", "r") as f:
+        docker_tail = f.read()
+    # Get docker-compose
+    with open(local_exports_path / "docker-compose.yaml", "r") as f:
+        docker_compose = f.read()
+
+    dep_filepaths = []
+    deps = snapshot.get("deps")
+    if deps is None:
+        # If there are no deps, concatenate head and tail
+        dockerfile = docker_head + docker_tail
+        # If there are not deps, we don't need docker-compose
+    else:
+        # Get the filepaths of the dependencies
+        for dep_name in deps.keys():
+            dep_filepaths.append(checkout_dir / Path(dep_name))
+
+        volume_declaration = []
+        compose_declaration = []
+        for path in dep_filepaths:
+            volume_declaration.append(f"VOLUME /home/Code/{path.name}")
+            compose_declaration.append(f"      - {path}:/home/Code/{path.name}")
+
+        dockerfile = docker_head + "\n".join(volume_declaration) + docker_tail
+        docker_compose = docker_compose + "\n".join(compose_declaration)
+
+    # Write Dockerfile
+    with open(checkout_dir / "Dockerfile", "w") as f:
+        f.write(dockerfile)
+
+    # Check if docker_compose is None
+    if docker_compose is not None:
+        # Write docker-compose file
+        with open(checkout_dir / "docker-compose.yaml", "w") as f:
+            f.write(docker_compose)
