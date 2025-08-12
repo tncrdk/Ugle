@@ -72,17 +72,10 @@ def snapshot(tomlfile_path_str: str, verbose: bool = False):
     if spack_config is not None:
         spack_deps(spack_config, snapshot, work_dir, tomlfile_path, verbose)
 
-    # TODO: Handle current folder project
-
     # Other dependencies
     deps = config.get("deps")
-    if deps is None:
-        # deps = {"work_dir": {"filepath": "."}}
-        deps = dict()
-    # else:
-    #     deps["work_dir"] = {"filepath": "."}
-
-    handle_other_deps(deps, snapshot, work_dir, verbose)
+    if deps is not None:
+        handle_other_deps(deps, snapshot, work_dir, verbose)
 
     # Get docker-helpers
     load_docker_helpers(snapshot, verbose)

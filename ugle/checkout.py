@@ -399,7 +399,7 @@ def commit_exists(path: Path, commit_hash: str) -> bool:
         `bool`
         True if the commit exists, False otherwise
     """
-    # Get cwd, so we can return to it after the function has executed
+    # If the following command throws an error, then the commit does not exist
     if (
         subprocess.run(
             ["git", "cat-file", "commit", commit_hash], capture_output=True, cwd=path
@@ -411,9 +411,6 @@ def commit_exists(path: Path, commit_hash: str) -> bool:
 
 
 def create_dockerfiles(snapshot: dict, checkout_dir: Path, verbose: bool = False):
-    # TODO: Create docker-compose as well
-    # tab indent = 6
-
     # Create the path to the local exports folder
     local_exports_path = Path(__file__).parent / "exports"
 
@@ -427,23 +424,23 @@ def create_dockerfiles(snapshot: dict, checkout_dir: Path, verbose: bool = False
     with open(local_exports_path / "docker-compose.yaml", "r") as f:
         docker_compose = f.read()
 
-    dep_filepaths = []
     deps = snapshot.get("deps")
     if deps is None:
         # If there are no deps, concatenate head and tail
-        verbose_print(verbose, "No local dependencies. Will not create docker-compose")
+        verbose_print(verbose, "No local dependencies.")
         dockerfile = docker_head + docker_tail
         # If there are not deps, we don't need docker-compose
     else:
         verbose_print(verbose, f"Adding local dependencies")
         volume_declaration = []
-        compose_declaration = []
+        compose_declaration = ["    volumes:"]
 
         # Get the filepaths of the dependencies
         for dep_name in deps.keys():
             path = checkout_dir / Path(dep_name)
 
             volume_declaration.append(f"VOLUME /home/Code/{path.name}")
+            # Tab-indent: 6 spaces
             compose_declaration.append(f"      - {path}:/home/Code/{path.name}")
 
         dockerfile = docker_head + "\n".join(volume_declaration) + docker_tail
@@ -454,8 +451,6 @@ def create_dockerfiles(snapshot: dict, checkout_dir: Path, verbose: bool = False
     with open(checkout_dir / "Dockerfile", "w") as f:
         f.write(dockerfile)
 
-    # Check if docker_compose is None
-    if docker_compose is not None:
-        # Write docker-compose file
-        with open(checkout_dir / "docker-compose.yaml", "w") as f:
-            f.write(docker_compose)
+    # Write docker-compose file
+    with open(checkout_dir / "docker-compose.yaml", "w") as f:
+        f.write(docker_compose)

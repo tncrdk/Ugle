@@ -4,14 +4,15 @@ import shutil
 import re
 from pathlib import Path
 from graphlib import TopologicalSorter
-from typing import Optional
 
 
-from utils import verbose_print, check_if_file_exists
+from utils import verbose_print
 
 # TODO: If apt-cache | dpkg-repack is not a command, it will throw an error (FileNotFoundError)
-# TODO: Use lsb_release to get the ubuntu version
+# TODO: Use lsb_release to get the ubuntu version (unstable and does not work
+# all the time -> default bakcup?)
 # TODO: Check if removing 'recommends' packages has an effect
+# TODO: Handle failed packages (raise exception?)
 
 
 def repack_apt_installed_packages(
@@ -45,10 +46,12 @@ def repack_apt_installed_packages(
     predep_tree = reformat_predep_tree(predep_tree, name_filename_map)
 
     # Sort the dependency-tree
+    verbose_print(verbose, f"Sorting the dependency tree")
     ts = TopologicalSorter(predep_tree)
     sorted_dep_tree = ts.static_order()
 
     # Store the sorted dependency-tree in deps.txt
+    verbose_print(verbose, f"Writing the dependency tree to 'deps.txt'")
     with open(apt_dir / "deps.txt", "w") as f:
         f.write(",".join(sorted_dep_tree))
 
@@ -112,8 +115,7 @@ def repack_package(
     stdout = output.stdout.decode()
 
     # If the stdout is empty, the command failed
-    # TODO: Improve error handling, warnings are printed as stderr
-    # Test this implementation
+    # TODO: Test error handling, warnings are printed as stderr
     if stdout == "":
         err = output.stderr.decode()
         # In case of an error, don't throw it, but store it.
