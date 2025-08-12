@@ -16,7 +16,7 @@ from utils import verbose_print, check_if_file_exists
 
 
 def checkout(
-    lockfile_path_str: str,
+    zipfile_path_str: str,
     destination_path_str: Optional[str],
     force: bool = False,
     verbose: bool = False,
@@ -29,12 +29,11 @@ def checkout(
 
     ---
     Args:
-        lockfile_path_str : `str`
-            The filepath to the lockfile we will use to load the snapshot from
+        zipfile_path_str : `str`
+            The filepath to the zipfile we will load the snapshot from
 
         destination_path_str : `Optional[str]`
-            Alternative destination to recreate the snapshot. If not supplied, the snapshot
-            will be created at `~/.ugle/`
+            Alternative destination to recreate the snapshot. If not supplied, the snapshot will be created at `~/.ugle/`
 
         force : `bool`, default=False
             If force is supplied, necessary files and folders will be overwritten for the checkout to succeed
@@ -46,11 +45,36 @@ def checkout(
     Returns:
         None
     """
-    # Copy spack lockfile (if exists)
-    # store commit hash and either url or filepath to all other deps
+    zipfile_path = Path(zipfile_path_str).expanduser().resolve()
+    # Check if the zipfile exists
+    verbose_print(verbose, f"Looking for zipfile at {zipfile_path}")
+    exists, err_msg = check_if_file_exists(zipfile_path)
+    if not exists:
+        raise FileNotFoundError(err_msg)
+    verbose_print(verbose, f"Found zipfile at {zipfile_path}")
+
+    # Get the checkout directory where the snapshot will be rebuilt
+    name = zipfile_path.stem
+    # If a destination has been supplied, use it. Otherwise default to '~/.ugle/'
+    if destination_path_str is not None:
+        checkout_dir = Path(destination_path_str).expanduser().resolve()
+    else:
+        checkout_dir = (Path("~/.ugle/") / name).expanduser().resolve()
+
+    # Create the checkout directory
+    # If 'force' is supplied, it will overwrite necessary files
+    if checkout_dir.exists():
+        if force:
+            shutil.rmtree(checkout_dir)
+        else:
+            raise ValueError(f"{checkout_dir} already exists. Aborting")
+
+    # Unpack the zipfile
+    verbose_print(verbose, f"Unzipping {zipfile_path}")
+    shutil.unpack_archive(zipfile_path, extract_dir=checkout_dir)
 
     # Resolve the lockfile path
-    lockfile_path = Path(lockfile_path_str).expanduser().resolve()
+    lockfile_path = checkout_dir / "ugle.lock"
 
     # Check if the lockfile exists
     verbose_print(verbose, f"Looking for lockfile at {lockfile_path}")
@@ -65,8 +89,8 @@ def checkout(
     # Create TOML filepath based on the lockfile
     tomlfile_path = lockfile_path.with_suffix(".toml")
 
-    verbose_print(verbose, f"Looking for TOML-file at {tomlfile_path}")
     # Check if the TOML file exists
+    verbose_print(verbose, f"Looking for TOML-file at {tomlfile_path}")
     exists, err_msg = check_if_file_exists(tomlfile_path)
     if exists:
         # Open the TOML file if it exists
@@ -77,22 +101,6 @@ def checkout(
         # Default to empty dict if the TOML file does not exist
         verbose_print(verbose, f"Did not find TOML-file at {tomlfile_path}")
         toml_config = dict()
-
-    # Get the checkout directory where the snapshot will be rebuilt
-    name: Optional[str] = config.get("name")
-    if name is None:
-        raise ValueError(f"'name' not found in {lockfile_path.name}")
-    # If a destination has been supplied, use it. Otherwise default to '~/.ugle/'
-    if destination_path_str is not None:
-        checkout_dir = Path(destination_path_str).expanduser().resolve()
-    else:
-        checkout_dir = (Path("~/.ugle/") / name).expanduser().resolve()
-
-    # Create the checkout directory
-    # If 'force' is supplied, it will overwrite necessary files
-    if checkout_dir.exists() and force:
-        shutil.rmtree(checkout_dir)
-    checkout_dir.mkdir(parents=True)  # Will raise an error if the folder exists
 
     verbose_print(verbose, "-" * 10)
 
@@ -105,6 +113,7 @@ def checkout(
 
     # Run all the accumulated commands
     print()
+    print("Running accululated commands")
     print("=" * 10)
     for dir, dep_cmds in commands.items():
         verbose_print(verbose, "-" * 5)
@@ -121,6 +130,10 @@ def checkout(
                 raise Exception(err)
     print("=" * 10)
     print()
+    verbose_print(verbose, f"Checking for Apt dependencies")
+
+    # Create necessary dockerfiles
+    create_dockerfiles(config, checkout_dir, verbose)
 
     verbose_print(verbose, f"Checking for Spack dependencies")
     spack_config = config.get("spack")
@@ -133,7 +146,7 @@ def checkout(
             verbose_print(verbose, f"Removing old spack.lock: {spack_file}")
             os.remove(spack_file)
 
-        verbose_print(verbose, f"Dumping Spack lockfile into {spack_file}")
+        print(f"Dumping Spack lockfile into {spack_file}")
         # Create lockfile and dump the lockfile contents into it
         with open(spack_file, "w") as f:
             json.dump(spack_config, f)
@@ -148,6 +161,17 @@ def checkout(
         print(f"$ spack env activate <name>")
         print("$ spack install")
 
+    # Print instructions for Docker
+    print()
+    print("#" * 60)
+    print("To run the Docker-container:")
+    print("#" * 60)
+    print(f"$ cd {checkout_dir}")
+    print(f"$ docker build . -t <image name>")
+    print(f"[ Update docker-compose.yaml with the correct names ]")
+    print(f"$ docker compose up -d")
+    print("$ docker compose exec <service name> bash")
+
 
 def load_deps(
     deps: dict[str, dict[str, str]],
@@ -156,7 +180,7 @@ def load_deps(
     commands: dict[str, list[list[str]]],
     verbose: bool = False,
 ):
-    """Checkout local dependencies not installed by Spack
+    """Checkout local dependencies not installed by package managers
 
     ---
     Args:
@@ -375,7 +399,7 @@ def commit_exists(path: Path, commit_hash: str) -> bool:
         `bool`
         True if the commit exists, False otherwise
     """
-    # Get cwd, so we can return to it after the function has executed
+    # If the following command throws an error, then the commit does not exist
     if (
         subprocess.run(
             ["git", "cat-file", "commit", commit_hash], capture_output=True, cwd=path
@@ -384,3 +408,49 @@ def commit_exists(path: Path, commit_hash: str) -> bool:
     ):
         return True
     return False
+
+
+def create_dockerfiles(snapshot: dict, checkout_dir: Path, verbose: bool = False):
+    # Create the path to the local exports folder
+    local_exports_path = Path(__file__).parent / "exports"
+
+    # Get head and tail of Dockerfile
+    # (Everything except the volume-declarations)
+    with open(local_exports_path / "Dockerfile-head.txt", "r") as f:
+        docker_head = f.read()
+    with open(local_exports_path / "Dockerfile-tail.txt", "r") as f:
+        docker_tail = f.read()
+    # Get docker-compose
+    with open(local_exports_path / "docker-compose.yaml", "r") as f:
+        docker_compose = f.read()
+
+    deps = snapshot.get("deps")
+    if deps is None:
+        # If there are no deps, concatenate head and tail
+        verbose_print(verbose, "No local dependencies.")
+        dockerfile = docker_head + docker_tail
+        # If there are not deps, we don't need docker-compose
+    else:
+        verbose_print(verbose, f"Adding local dependencies")
+        volume_declaration = []
+        compose_declaration = ["    volumes:"]
+
+        # Get the filepaths of the dependencies
+        for dep_name in deps.keys():
+            path = checkout_dir / Path(dep_name)
+
+            volume_declaration.append(f"VOLUME /home/Code/{path.name}")
+            # Tab-indent: 6 spaces
+            compose_declaration.append(f"      - {path}:/home/Code/{path.name}")
+
+        dockerfile = docker_head + "\n".join(volume_declaration) + docker_tail
+        docker_compose = docker_compose + "\n".join(compose_declaration)
+
+    # Write Dockerfile
+    print("Writing Dockerfile")
+    with open(checkout_dir / "Dockerfile", "w") as f:
+        f.write(dockerfile)
+
+    # Write docker-compose file
+    with open(checkout_dir / "docker-compose.yaml", "w") as f:
+        f.write(docker_compose)
