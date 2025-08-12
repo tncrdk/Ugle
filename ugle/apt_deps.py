@@ -35,6 +35,7 @@ def repack_apt_installed_packages(
         if predep_tree.get(package) is not None:
             continue
         print("-" * 10)
+        print(f"Repacking {package} and dependencies")
         # Find all dependencies and run dpkg-repack on all them
         repack_packages_recursive(
             package, apt_dir, predep_tree, name_filename_map, failed_packages, verbose
@@ -182,7 +183,7 @@ def repack_package(
     # Extend the list of packages to check
     verbose_print(verbose, f"Adding dependencies to the queue")
     packages += deps
-    print()
+    verbose_print(verbose, "")
 
 
 def reformat_predep_tree(

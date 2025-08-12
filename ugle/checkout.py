@@ -33,8 +33,7 @@ def checkout(
             The filepath to the zipfile we will load the snapshot from
 
         destination_path_str : `Optional[str]`
-            Alternative destination to recreate the snapshot. If not supplied, the snapshot
-            will be created at `~/.ugle/`
+            Alternative destination to recreate the snapshot. If not supplied, the snapshot will be created at `~/.ugle/`
 
         force : `bool`, default=False
             If force is supplied, necessary files and folders will be overwritten for the checkout to succeed
@@ -114,6 +113,7 @@ def checkout(
 
     # Run all the accumulated commands
     print()
+    print("Running accululated commands")
     print("=" * 10)
     for dir, dep_cmds in commands.items():
         verbose_print(verbose, "-" * 5)
@@ -146,7 +146,7 @@ def checkout(
             verbose_print(verbose, f"Removing old spack.lock: {spack_file}")
             os.remove(spack_file)
 
-        verbose_print(verbose, f"Dumping Spack lockfile into {spack_file}")
+        print(f"Dumping Spack lockfile into {spack_file}")
         # Create lockfile and dump the lockfile contents into it
         with open(spack_file, "w") as f:
             json.dump(spack_config, f)
@@ -168,7 +168,7 @@ def checkout(
     print("#" * 60)
     print(f"$ cd {checkout_dir}")
     print(f"$ docker build . -t <image name>")
-    print(f"- Update docker-compose.yaml with the correct names")
+    print(f"[ Update docker-compose.yaml with the correct names ]")
     print(f"$ docker compose up -d")
     print("$ docker compose exec <service name> bash")
 
@@ -180,7 +180,7 @@ def load_deps(
     commands: dict[str, list[list[str]]],
     verbose: bool = False,
 ):
-    """Checkout local dependencies not installed by Spack
+    """Checkout local dependencies not installed by package managers
 
     ---
     Args:
@@ -430,16 +430,18 @@ def create_dockerfiles(snapshot: dict, checkout_dir: Path, verbose: bool = False
     deps = snapshot.get("deps")
     if deps is None:
         # If there are no deps, concatenate head and tail
+        verbose_print(verbose, "No local dependencies. Will not create docker-compose")
         dockerfile = docker_head + docker_tail
         # If there are not deps, we don't need docker-compose
     else:
-        # Get the filepaths of the dependencies
-        for dep_name in deps.keys():
-            dep_filepaths.append(checkout_dir / Path(dep_name))
-
+        verbose_print(verbose, f"Adding local dependencies")
         volume_declaration = []
         compose_declaration = []
-        for path in dep_filepaths:
+
+        # Get the filepaths of the dependencies
+        for dep_name in deps.keys():
+            path = checkout_dir / Path(dep_name)
+
             volume_declaration.append(f"VOLUME /home/Code/{path.name}")
             compose_declaration.append(f"      - {path}:/home/Code/{path.name}")
 
@@ -447,6 +449,7 @@ def create_dockerfiles(snapshot: dict, checkout_dir: Path, verbose: bool = False
         docker_compose = docker_compose + "\n".join(compose_declaration)
 
     # Write Dockerfile
+    print("Writing Dockerfile")
     with open(checkout_dir / "Dockerfile", "w") as f:
         f.write(dockerfile)
 
