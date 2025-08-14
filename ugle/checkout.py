@@ -104,32 +104,30 @@ def checkout(
 
     verbose_print(verbose, "-" * 10)
 
-    # Commands to run when checking out the snapshot
-    commands: dict[str, list[list[str]]] = dict()
-
     deps = config.get("deps")
     if deps is not None:
-        load_deps(deps, toml_config, checkout_dir, commands, verbose)
+        load_deps(deps, toml_config, checkout_dir, verbose)
 
-    # Run all the accumulated commands
-    print()
-    print("Running accululated commands")
-    print("=" * 10)
-    for dir, dep_cmds in commands.items():
-        verbose_print(verbose, "-" * 5)
-        # Make sure the directory exists
-        Path(dir).mkdir(parents=True)
-        print(f"In: {dir}")
-        for cmd in dep_cmds:
-            verbose_print(verbose, "Running: " + " ".join(cmd))
-            output = subprocess.run(cmd, capture_output=True, cwd=dir)
-            err = output.returncode
-            # If errors occured, print them and raise en exception
-            if err != 0:
-                print(f"Error encountered in {dir} when running \n$ {" ".join(cmd)}")
-                raise Exception(err)
-    print("=" * 10)
-    print()
+    # # Run all the accumulated commands
+    # print()
+    # print("Running accululated commands")
+    # print("=" * 10)
+    # for dir, dep_cmds in commands.items():
+    #     verbose_print(verbose, "-" * 5)
+    #     # Make sure the directory exists
+    #     Path(dir).mkdir(parents=True)
+    #     print(f"In: {dir}")
+    #     for cmd in dep_cmds:
+    #         verbose_print(verbose, "Running: " + " ".join(cmd))
+    #         output = subprocess.run(cmd, capture_output=True, cwd=dir)
+    #         err = output.returncode
+    #         # If errors occured, print them and raise en exception
+    #         if err != 0:
+    #             print(f"Error encountered in {dir} when running \n$ {" ".join(cmd)}")
+    #             raise Exception(err)
+    # print("=" * 10)
+    # print()
+    print("_" * 5)
     verbose_print(verbose, f"Checking for Apt dependencies")
 
     # Create necessary dockerfiles
@@ -177,7 +175,6 @@ def load_deps(
     deps: dict[str, dict[str, str]],
     toml_config: dict,
     checkout_dir: Path,
-    commands: dict[str, list[list[str]]],
     verbose: bool = False,
 ):
     """Checkout local dependencies not installed by package managers
@@ -231,8 +228,8 @@ def load_deps(
         url = dep.get("url")
 
         # If the dep exist in the TOML file, retrieve the filepath
-        toml_deps = toml_config.get("deps")
         toml_filepath = None
+        toml_deps = toml_config.get("deps")
         if toml_deps is not None:
             toml_dep = toml_deps.get(dep_name)
             if toml_dep is not None:
@@ -246,7 +243,6 @@ def load_deps(
             commit_hash,
             url,
             checkout_dir,
-            commands,
             verbose,
         )
 
@@ -258,7 +254,6 @@ def load_dep(
     commit_hash: str,
     url: Optional[str],
     checkout_dir: Path,
-    commands: dict[str, list[list[str]]],
     verbose: bool = False,
 ):
     """
@@ -311,13 +306,13 @@ def load_dep(
     Returns:
         None
     """
+    print(f"Checkout of {dep_name}")
     # Paths to check for the commit. The last one is the default location to
     # clone in the git repo if the other two fails. Expects destination_path to
     # be empty
+    
     destination_path = checkout_dir / dep_name
-    destination_path_str = str(destination_path)
     src = None
-    commands[destination_path_str] = []
 
     # If the `destination_path` exists, throw an error
     if destination_path.exists():
@@ -325,44 +320,42 @@ def load_dep(
 
     verbose_print(verbose, f"Looking for commit: {commit_hash}")
 
-    # If we did not find the commit there already, we need to search more
-    # directories
-    if src is None:
-        search_paths = [lockfile_path, tomlfile_path]
+    # Possible search paths to investigate when looking for dependency
+    search_paths = [lockfile_path, tomlfile_path]
+    for path in search_paths:
+        verbose_print(verbose, f"Looking in {path}")
 
-        for path in search_paths:
-            verbose_print(verbose, f"Looking in {path}")
+        # If the path does not exist, move on to the next
+        if path is None or not path.exists():
+            continue
+        if commit_exists(path, commit_hash):
+            # If the commit exists at the filepath location, copy the files and break
+            verbose_print(verbose, f"Found commit in: {path}")
+            src = path
+            subprocess.run(
+                ["cp", "-r", str(path), str(destination_path.parent)],
+                capture_output=True,
+            )
+            break
 
-            # If the path does not exist, move on to the next
-            if path is None or not path.exists():
-                continue
-            if commit_exists(path, commit_hash):
-                # If the commit exists at the filepath location, break
-                verbose_print(verbose, f"Found commit in: {path}")
-                src = path
-                commands[destination_path_str].append(
-                    ["cp", "-r", str(path), str(destination_path.parent)]
-                )
-                break
+    if src is None and url is not None:
+        # Want to clone the repo to see if it has the commit.
 
-        if src is None and url is not None:
-            # Want to clone the repo to see if it has the commit.
+        # Clone the repo
+        verbose_print(verbose, f"Cloning from {url} into {destination_path}")
+        # TODO: This can fail (no repo / no internet / etc)
+        subprocess.run(["git", "clone", url, destination_path])
 
-            # Clone the repo
-            verbose_print(verbose, f"Cloning from {url} into {destination_path}")
-            # TODO: This can fail (no repo / no internet / etc)
-            subprocess.run(["git", "clone", url, destination_path])
-
-            if commit_exists(destination_path, commit_hash):
-                # If the commit exists, move it to the destination directory
-                verbose_print(verbose, f"Commit found at {url}.")
-                src = destination_path
-            else:
-                # If the commit does not exist, remove the pulled repo
-                verbose_print(
-                    verbose, f"Commit not found at {destination_path}. Cleaning up"
-                )
-                shutil.rmtree(destination_path)
+        if commit_exists(destination_path, commit_hash):
+            # If the commit exists, move it to the destination directory
+            verbose_print(verbose, f"Commit found at {url}.")
+            src = destination_path
+        else:
+            # If the commit does not exist, remove the pulled repo
+            verbose_print(
+                verbose, f"Commit not found at {destination_path}. Cleaning up"
+            )
+            shutil.rmtree(destination_path)
 
     if src is None:
         # TODO: Improve error msg
@@ -375,16 +368,18 @@ def load_dep(
         cwd=src,
     ).stdout.decode()
     if not git_status == "":
-        # Remove all non-committed changes and untracked files
-        # from destination_path (not src)
-        commands[destination_path_str].append(["git", "reset", "--hard", "HEAD"])
+        # Remove all non-committed changes
+        # from destination_path (not src) so that we can checkout
+        verbose_print(verbose, f"Running: git reset --hard HEAD")
+        subprocess.run(["git", "reset", "--hard", "HEAD"], capture_output=True)
 
         # TODO: Figure out if we want to remove untracked files as well. Should
         # change the 'if not git_status == ""' as well
 
         # commands[destination_path_str].append(["git", "clean", "-dfx"])
 
-    commands[destination_path_str].append(["git", "checkout", commit_hash])
+    verbose_print(verbose, f"Running: git checkout {commit_hash}")
+    subprocess.run(["git", "checkout", commit_hash], capture_output=True)
 
     verbose_print(verbose, "-" * 10)
 

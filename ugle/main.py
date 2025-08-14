@@ -10,6 +10,7 @@ import checkout
 # TODO: Create requirements.txt for python and similar for js
 # TODO: Raise exception if dpkg-repack, apt, etc. does not exist
 # TODO: Remove command stack. Run the commands. Clean up if an error occurs.
+# TODO: Better printing
 
 
 # ====================================================================================
