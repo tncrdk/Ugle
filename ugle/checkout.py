@@ -8,7 +8,6 @@ from typing import Optional
 
 from utils import verbose_print, check_if_file_exists
 
-# TODO: Test to clone from private repos
 
 # ====================================================================================
 # Checkout
@@ -70,7 +69,7 @@ def checkout(
             raise ValueError(f"{checkout_dir} already exists. Aborting")
 
     # Unpack the zipfile
-    verbose_print(verbose, f"Unzipping {zipfile_path}")
+    verbose_print(verbose, f"Unzipping {zipfile_path} into {checkout_dir}")
     shutil.unpack_archive(zipfile_path, extract_dir=checkout_dir)
 
     # Resolve the lockfile path
@@ -81,8 +80,9 @@ def checkout(
     exists, err_msg = check_if_file_exists(lockfile_path)
     if not exists:
         raise FileNotFoundError(err_msg)
+
+    # If found, open the lockfile
     verbose_print(verbose, f"Found lockfile at {lockfile_path}\n")
-    # Open the lockfile
     with open(lockfile_path, "r") as f:
         config = json.load(f)
 
@@ -221,6 +221,11 @@ def load_deps(
         None
     """
     for dep_name, dep in deps.items():
+        copy = dep.get("copy")
+        # If the dep was copied, it is already handled by unpacking the zipfile
+        if copy:
+            continue
+
         lock_filepath = Path(dep["filepath"])
         commit_hash = dep["hash"]
         url = dep.get("url")

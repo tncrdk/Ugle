@@ -7,8 +7,9 @@ import checkout
 
 # TODO: Snapshot which spack repos packages are coming from?
 # TODO: Make the program clean up after itself regardsless of errors thrown
-# TODO: Consider copy local deps instead of git and github
 # TODO: Create requirements.txt for python and similar for js
+# TODO: Raise exception if dpkg-repack, apt, etc. does not exist
+# TODO: Remove command stack. Run the commands. Clean up if an error occurs.
 
 
 # ====================================================================================

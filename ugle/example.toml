@@ -9,6 +9,7 @@ lockfile = <spack lock-file path>
 [deps.foo-dependency]
 url = <github:url>
 filepath = <filepath>
+copy = <bool> # Defaults to True
 
 [deps.bar-dependency]
 url = <github:url>

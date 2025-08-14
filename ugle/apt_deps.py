@@ -11,7 +11,6 @@ from utils import verbose_print
 # TODO: If apt-cache | dpkg-repack is not a command, it will throw an error (FileNotFoundError)
 # TODO: Use lsb_release to get the ubuntu version (unstable and does not work
 # all the time -> default bakcup?)
-# TODO: Check if removing 'recommends' packages has an effect
 # TODO: Handle failed packages (raise exception?)
 
 

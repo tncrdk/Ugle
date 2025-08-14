@@ -75,14 +75,10 @@ def snapshot(tomlfile_path_str: str, verbose: bool = False):
     # Other dependencies
     deps = config.get("deps")
     if deps is not None:
-        handle_other_deps(deps, snapshot, work_dir, verbose)
+        handle_other_deps(deps, snapshot, work_dir, archive_dir, verbose)
 
-    # Get docker-helpers
+    # Load docker-helpers into the snapshot
     load_docker_helpers(snapshot, verbose)
-
-    # Create the lockfile and store the snapshot in it
-    with open(lockfile_path, "w") as f:
-        json.dump(snapshot, f)
 
     # Handle apt installed packages
     apt_packages = config.get("apt")
@@ -93,6 +89,10 @@ def snapshot(tomlfile_path_str: str, verbose: bool = False):
             Path(__file__).parent / "exports" / "install.sh",
             archive_dir / "apt" / "install.sh",
         )
+
+    # Create the lockfile and store the snapshot in it
+    with open(lockfile_path, "w") as f:
+        json.dump(snapshot, f)
 
     # Copy the TOML-file into the archive
     shutil.copyfile(tomlfile_path, archive_dir / "ugle.toml")
@@ -180,6 +180,7 @@ def handle_other_deps(
     deps: dict[str, dict[str, str]],
     snapshot: dict,
     work_dir: Path,
+    archive_dir: Path,
     verbose: bool = False,
 ):
     """Handle local dependencies not installed by Spack
@@ -209,16 +210,55 @@ def handle_other_deps(
     for dep_name, dep in deps.items():
         filepath = dep.get("filepath")
         url = dep.get("url")
+        copy = dep.get("copy")
+        if copy is None:
+            copy = True
 
         if filepath is not None:
-            local_dep(dep_name, filepath, snapshot, work_dir, url, verbose)
+            if copy:
+                local_dep_copy(
+                    dep_name, filepath, snapshot, work_dir, archive_dir, verbose
+                )
+            else:
+                local_dep_git(dep_name, filepath, snapshot, work_dir, url, verbose)
         else:
             raise KeyError(
                 f"The dependency {dep_name} does not supply a filepath nor an url."
             )
 
 
-def local_dep(
+def local_dep_copy(
+    name: str,
+    filepath_str: str,
+    snapshot: dict,
+    work_dir: Path,
+    archive_dir: Path,
+    verbose: bool = False,
+):
+    filepath = create_absolute_path(Path(filepath_str), work_dir)
+    print()
+    print("=" * 10)
+    print(f"{name.upper()} (BY COPY): ")
+    print(f"Looking for {name} in {filepath}")
+    if not filepath.exists():
+        raise FileNotFoundError(f"Filepath {filepath} does not exist")
+    if not filepath.is_dir():
+        raise Exception(f"Filepath {filepath} is not a directory")
+
+    dest = archive_dir / name
+    verbose_print(verbose, f"Destination: {dest}")
+    if dest.exists():
+        verbose_print(verbose, f"{dest} already exists. Creating new destination-name")
+        dest.with_name(dest.name + "-" + str(uuid.uuid4()))
+    # Copy the dependency to the temporary folder that is to be zipped
+    verbose_print(verbose, f"Copy {filepath} to {dest}")
+    subprocess.run(["cp", "-r", filepath, dest], capture_output=True)
+    snapshot["deps"][name] = {
+        "copy": True,
+    }
+
+
+def local_dep_git(
     name: str,
     filepath_str: str,
     snapshot: dict,
@@ -256,7 +296,7 @@ def local_dep(
     filepath = create_absolute_path(Path(filepath_str), work_dir)
     print()
     print("=" * 10)
-    print(f"{name.upper()}: ")
+    print(f"{name.upper()} (BY GIT): ")
     print(f"Looking for {name} in {filepath}")
     if not filepath.exists():
         raise FileNotFoundError(f"Filepath {filepath} does not exist")
@@ -329,12 +369,14 @@ def local_dep(
         snapshot["deps"][name] = {
             "filepath": str(filepath),
             "hash": commit_hash,
+            "copy": False,
             "url": url,
         }
     else:
         snapshot["deps"][name] = {
             "filepath": str(filepath),
             "hash": commit_hash,
+            "copy": False,
         }
 
 
