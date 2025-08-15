@@ -69,6 +69,21 @@ def verbose_print(verbose: bool, msg: str) -> None:
 def check_subprocess_error(
     output: subprocess.CompletedProcess, cwd: Path | None = None
 ):
+    """
+    Check if the subprocess exited with an error, and if so propagate it.
+
+    ---
+    Args:
+        output : `subprocess.CompletedProcess`
+            The output of the `subprocess.run`-command
+        cwd : `Path | None`, default `None`
+            The directory the command was run from. If None, the directory is
+            set to be `Path(__file__)`
+
+    ---
+    Returns:
+        None
+    """
     if output.returncode != 0:
         if cwd is None:
             cwd = Path(__file__)
@@ -84,10 +99,28 @@ def check_subprocess_error(
             stderr=output.stderr,
         )
 
+
 def check_tool_existence(tool: str):
+    """
+    Checks if the tool is available for the program to use. If not, this will
+    produce a `FileNotFoundError`.
+
+    ---
+    Args:
+        tool : `str`
+            The name of the tool to check. Needs to be the name used at the
+            cmd-line when invoking the tool. Ex: `ripgrep` is a tool, but its
+            command-name is `rg`. Then the `tool`-argument should be `rg`.
+
+    ---
+    Returns:
+        None
+    """
     try:
         subprocess.run([tool], capture_output=True)
     except FileNotFoundError:
-        raise FileNotFoundError(f"{tool} does not exist or is not executable on the system")
+        raise FileNotFoundError(
+            f"{tool} does not exist or is not executable on the system"
+        )
     except:
         pass

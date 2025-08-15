@@ -391,6 +391,26 @@ def commit_exists(path: Path, commit_hash: str) -> bool:
 
 
 def create_dockerfiles(snapshot: dict, checkout_dir: Path, verbose: bool = False):
+    """
+    Create the 'Dockerfile' and 'docker-compose.yaml' that is meant to run the
+    snapshotted programs.
+
+    ---
+    Args:
+        snapshot : `dict`
+            Config-dictionary loaded from the 'lock'-file that specifies the
+            snapshots dependencies.
+
+        checkout_dir : `Path`
+            The directory where the snapshot will be recreated at.
+
+        verbose : `bool`, default=False
+            Enable verbose printing
+
+    ---
+    Returns:
+        None
+    """
     print()
     print("=" * 20)
     print()
@@ -442,6 +462,14 @@ def create_dockerfiles(snapshot: dict, checkout_dir: Path, verbose: bool = False
 
 
 def check_script_dependencies():
+    """
+    Check if the scripts dependencies are available at the system the program is
+    to be run on. If they are not an error is thrown.
+
+    ---
+    Returns:
+        None
+    """
     check_tool_existence("git")
     check_tool_existence("dpkg-repack")
     check_tool_existence("apt-cache")

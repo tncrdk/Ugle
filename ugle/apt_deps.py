@@ -15,6 +15,28 @@ from utils import verbose_print
 def repack_apt_installed_packages(
     packages: list[str], archive_dir: Path, snapshot: dict, verbose: bool = False
 ):
+    """
+    Repack all the packages defined in the '.toml'-file along with their
+    dependencies. They will be stored in the `archive_dir`
+    ---
+    Args:
+        packages : `list[str]`
+            List of the main packages to add to the snapshot
+
+        archive_dir: `Path`
+            The directory where the archive is being created before it gets
+            zipped
+
+        snapshot : `dict`
+            The snapshot dictionary to be dumped. Will be modified inside the function
+
+        verbose : `bool`, default 'False'
+            Enable verbose printing
+
+    ---
+    Returns:
+        None
+    """
     # Create a unique target directory to save the .deb files in
     apt_dir = archive_dir / "apt"
     # Should not exist, artifact from earlier implementation
@@ -68,9 +90,34 @@ def repack_packages_recursive(
     apt_dir: Path,
     predep_tree: dict[str, list[str]],
     name_filename_map: dict[str, str],
-    failed_packages: list[tuple[str, str]],
     verbose: bool = False,
 ):
+    """
+    Recursively add the package root and all its dependencies to the snapshot.
+
+    ---
+    Args:
+        package_root : `str`
+            Name of the root-package to add to the snapshot
+
+        apt_dir : `Path`
+            The directory to store the repackaged packages
+
+        predep_tree : `dict[str, list[str]]`
+            A tree-like structure tracking the pre-dependencies of packages.
+            This needs to be tracked to be able to install the packages in the
+            correct order when reinstalling them.
+
+        name_filename_map : `dict[str, str]`
+            A one-to-one map of dependency-name and filepath to that dependency.
+
+        verbose : `bool`, default 'False'
+            Enable verbose printing
+
+    ---
+    Returns:
+        None
+    """
     # Init the packages list, currently only having the package root as its
     # element
     packages = [package_root]
@@ -90,21 +137,49 @@ def repack_packages_recursive(
             apt_dir,
             predep_tree,
             name_filename_map,
-            failed_packages,
             verbose,
         )
 
 
-# TODO: Find better name
 def repack_package(
     package_name: str,
     packages: list[str],
     apt_dir: Path,
     predep_tree: dict[str, list[str]],
     name_filename_map: dict[str, str],
-    failed_packages: list[tuple[str, str]],
     verbose: bool = False,
 ):
+    """
+    Repackage the package and add it to the snapshot. In addition get all its
+    dependencies so they can be added as well.
+
+    ---
+    Args:
+        package_name : `str`
+            Name of the package to repackage
+
+        packages : `list[str]`
+            List of packages to repackage. The dependencies of the package
+            defined by `package_name` will be added here
+
+        apt_dir : `Path`
+            The directory to store the repackaged packages
+
+        predep_tree : `dict[str, list[str]]`
+            A tree-like structure tracking the pre-dependencies of packages.
+            This needs to be tracked to be able to install the packages in the
+            correct order when reinstalling them.
+
+        name_filename_map : `dict[str, str]`
+            A one-to-one map of dependency-name and filepath to that dependency.
+
+        verbose : `bool`, default 'False'
+            Enable verbose printing
+
+    ---
+    Returns:
+        None
+    """
     # Repack the package
     verbose_print(verbose, f"Repacking {package_name}")
     output = subprocess.run(
@@ -116,13 +191,8 @@ def repack_package(
     # TODO: Test error handling, warnings are printed as stderr
     if stdout == "":
         err = output.stderr.decode()
-        # In case of an error, don't throw it, but store it.
-        print(f"{package_name} could not be added:")
-        print(err)
-        # Store the error
-        failed_packages.append((package_name, err))
-        raise Exception(err)
-        # Done with this package
+        # Raise the error
+        raise Exception(err + f"\n\n{package_name} could not be repackaged")
 
     # Retrieve the filepath for the dependency
     search_result = re.search(
@@ -158,9 +228,10 @@ def repack_package(
     )
     verbose_print(verbose, f"Checking dependencies of {package_name}")
     if output.returncode != 0:
-        # TODO: Improve error handling
-        print(f"Getting the dependencies of {package_name} failed:")
-        print(output.stderr.decode())
+        raise Exception(
+            f"Getting the dependencies of {package_name} failed:\n"
+            + output.stderr.decode()
+        )
 
     output_str = output.stdout.decode()
     # Regex for finding all dependencies (including recommends as these are
@@ -189,6 +260,24 @@ def repack_package(
 def reformat_predep_tree(
     dep_tree: dict[str, list[str]], name_filename_map: dict[str, str]
 ) -> dict[str, list[str]]:
+    """
+    Reformat the predependency-tree to use filepaths instead of names as keys
+    and values.
+
+    ---
+    Args:
+        predep_tree : `dict[str, list[str]]`
+            A tree-like structure tracking the pre-dependencies of packages.
+            This needs to be tracked to be able to install the packages in the
+            correct order when reinstalling them.
+
+        name_filename_map : `dict[str, str]`
+            A one-to-one map of dependency-name and filepath to that dependency.
+
+    ---
+    Returns:
+        None
+    """
     reformatted_dep_tree: dict[str, list[str]] = dict()
     for key, deps in dep_tree.items():
         # Get the filename of the given package

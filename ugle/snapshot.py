@@ -224,6 +224,10 @@ def handle_other_deps(
         work_dir: `Path`
             The parent directory of the TOML-file the current snapshot is based on
 
+        archive_dir: `Path`
+            The directory where the archive is being created before it gets
+            zipped
+
         verbose : `bool`, default 'False'
             Enable verbose printing
 
@@ -262,6 +266,35 @@ def local_dep_copy(
     archive_dir: Path,
     verbose: bool = False,
 ):
+    """
+    Add local dependency to the snapshot. The dependency is copied into the
+    archive directory.
+
+    ---
+    Args:
+        name : `str`
+            Name of the dependency
+
+        filepath_str : `str`
+            The filepath to the dependency
+
+        snapshot : `dict`
+            The snapshot dictionary to be dumped. Will be modified inside the function
+
+        work_dir: `Path`
+            The parent directory of the TOML-file the current snapshot is based on
+
+        archive_dir: `Path`
+            The directory where the archive is being created before it gets
+            zipped
+
+        verbose : `bool`, default 'False'
+            Enable verbose printing
+
+    ---
+    Returns:
+        None
+    """
     filepath = create_absolute_path(Path(filepath_str), work_dir)
     print("-" * 30)
     print(f"Snapshot of '{name}' (BY COPY): ")
@@ -297,7 +330,8 @@ def local_dep_git(
     verbose: bool = False,
 ):
     """
-    Add local dependency to the snapshot dictionary. The dependency is assumed to be a local git repo.
+    Add local dependency to the snapshot. The dependency is assumed to be a local git repo and
+    referenced by its commit hash.
 
     ---
     Args:
@@ -407,6 +441,22 @@ def local_dep_git(
 
 
 def load_docker_helpers(snapshot: dict, verbose: bool = False):
+    """
+    Load the helperfiles for creating the 'Dockerfile' and 'docker-compose.yaml'
+    when checking out the snapshot. They get loaded into the snapshot dictionary
+
+    ---
+    Args:
+        snapshot : `dict`
+            The snapshot dictionary to be dumped. Will be modified inside the function
+
+        verbose : `bool`, default 'False'
+            Enable verbose printing
+
+    ---
+    Returns:
+        None
+    """
     # Create the path to the local exports folder
     local_exports_path = Path(__file__).parent / "exports"
     # Retrieve head and tail of Dockerfile
@@ -425,6 +475,14 @@ def load_docker_helpers(snapshot: dict, verbose: bool = False):
 
 
 def check_script_dependencies():
+    """
+    Check if the scripts dependencies are available at the system the program is
+    to be run on. If they are not an error is thrown.
+
+    ---
+    Returns:
+        None
+    """
     check_tool_existence("git")
     check_tool_existence("dpkg-repack")
     check_tool_existence("cp")
