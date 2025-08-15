@@ -61,3 +61,48 @@ ln -s $path-to-main.py ugle
 - apt-cache
 - dpkg-repack
 - git
+
+## Full Example
+1. Clone the following repos to your computer:
+    - [Benchmark](https://github.com/tncrdk/benchmark)
+    - [Arithmetic](https://github.com/tncrdk/arithmetic/)
+    - [Memory](https://github.com/tncrdk/memory/)
+    - [Parallel](https://github.com/tncrdk/parallel/)
+    - [Disk](https://github.com/tncrdk/disk/)
+2. Install [Spack](https://spack.readthedocs.io/en/latest/).
+3. Create a spack environment with some packages installed
+4. Paste the following content into a `.toml`-file. E.g. `ugle.toml`.
+```toml
+name = "Test"
+
+apt = ["make", "python3", "cmake", "gcc"]
+
+[spack]
+lockfile = "~/<spack-installation>/spack/var/spack/environments/<name>/spack.lock"
+
+[deps.benchmark]
+filepath = "~/<Benchmarking>/benchmark/"
+copy = false
+# url = "https://github.com/OPM/IFEM.git"
+
+[deps.disk]
+filepath = "~/<Benchmarking>/disk/"
+
+[deps.memory]
+filepath = "~/<Benchmarking>/memory/"
+
+[deps.arithmetic]
+filepath = "~/<Benchmarking>/arithmetic/"
+
+[deps.parallel]
+filepath = "~/<Benchmarking>/parallel/"
+copy = false
+```
+5. Create snapshot with
+```sh
+ugle snapshot ugle.toml -v
+```
+6. Checkout the snapshot with
+```sh
+ugle checkout Test-<date>.zip -vf
+```
