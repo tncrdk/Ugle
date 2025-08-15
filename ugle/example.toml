@@ -1,17 +1,17 @@
 name = "Example"
+
 apt = [<package_1>, <package_2>, ...]
 
 [spack]
 lockfile = <spack lock-file path>
 
-# Both url and filepath are optional, but at least one needs to be there. Two
-# also works
+# Both url and copy are optional
 [deps.foo-dependency]
-url = <github:url>
 filepath = <filepath>
-copy = <bool> # Defaults to True
+url = <github:url>
+copy = <bool> # Defaults to True if omitted
 
 [deps.bar-dependency]
-url = <github:url>
 filepath = <filepath>
+url = <github:url>
 
