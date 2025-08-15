@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 
@@ -8,15 +9,15 @@ from pathlib import Path
 
 def check_if_file_exists(filename: Path) -> tuple[bool, str]:
     """Check if file exists (as a file)
----
-    Args:
-        filename : `Path`
-            The filename to check the existence of
-
     ---
-    Returns:
-        `tuple[bool, str]`
-            If the file exists, it will return [True, ""]. Otherwise [False, <err_msg>]
+        Args:
+            filename : `Path`
+                The filename to check the existence of
+
+        ---
+        Returns:
+            `tuple[bool, str]`
+                If the file exists, it will return [True, ""]. Otherwise [False, <err_msg>]
     """
     if not filename.exists():
         return (False, f"{filename.resolve()} does not exist.")
@@ -63,3 +64,30 @@ def verbose_print(verbose: bool, msg: str) -> None:
     """
     if verbose:
         print(msg)
+
+
+def check_subprocess_error(
+    output: subprocess.CompletedProcess, cwd: Path | None = None
+):
+    if output.returncode != 0:
+        if cwd is None:
+            cwd = Path(__file__)
+        print()
+        print()
+        print("=> ERROR")
+        print("CWD: ", cwd)
+        print(output.stderr.decode())
+        raise subprocess.CalledProcessError(
+            output.returncode,
+            " ".join(output.args),
+            output=output.stdout,
+            stderr=output.stderr,
+        )
+
+def check_tool_existence(tool: str):
+    try:
+        subprocess.run([tool], capture_output=True)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"{tool} does not exist or is not executable on the system")
+    except:
+        pass

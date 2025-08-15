@@ -9,7 +9,13 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from utils import check_if_file_exists, create_absolute_path, verbose_print
+from utils import (
+    check_if_file_exists,
+    check_subprocess_error,
+    create_absolute_path,
+    verbose_print,
+    check_tool_existence,
+)
 from apt_deps import repack_apt_installed_packages
 
 
@@ -32,23 +38,31 @@ def snapshot(tomlfile_path_str: str, verbose: bool = False):
     Returns:
         None
     """
-    # Copy spack lockfile (if exists)
-    # store commit hash and either url or filepath to all other deps
+    # Check if the dependencies of the script are available on the system
+    check_script_dependencies()
 
     snapshot = dict()
 
     # Resolve the TOML-file path
     tomlfile_path = Path(tomlfile_path_str).expanduser().resolve()
 
+    print()
+    print("TOML:")
     # Check if TOML-file exists
-    verbose_print(verbose, f"Looking for TOML-file at {tomlfile_path}")
+    verbose_print(verbose, f"Looking for TOML-file at '{tomlfile_path}'")
     exists, err_msg = check_if_file_exists(tomlfile_path)
     if not exists:
         raise FileNotFoundError(err_msg)
-    verbose_print(verbose, f"Found TOML-file at {tomlfile_path}\n")
+    print(f"Found TOML-file at '{tomlfile_path}'")
     # Open the TOML-file if it exists
     with open(tomlfile_path, "rb") as f:
         config = tomllib.load(f)
+
+    # Add the name of snapshot to the lockfile
+    name = config.get("name")
+    if name is None:
+        raise ValueError(f"The key 'name' is missing from {tomlfile_path.name}")
+    snapshot["name"] = name
 
     # Set the working directory, the directory where the TOML-file resides
     work_dir = tomlfile_path.parent
@@ -58,63 +72,74 @@ def snapshot(tomlfile_path_str: str, verbose: bool = False):
     archive_dir = work_dir / ("tmp-" + str(uuid.uuid4()))
     os.mkdir(archive_dir)
 
-    # Set the lockfile-path
-    lockfile_path = archive_dir / "ugle.lock"
-
-    # Add the name of snapshot to the lockfile
-    name = config.get("name")
-    if name is None:
-        raise ValueError(f"The key 'name' is missing from {tomlfile_path.name}")
-    snapshot["name"] = name
-
-    # If there is a Spack entry, handle it
-    spack_config = config.get("spack")
-    if spack_config is not None:
-        spack_deps(spack_config, snapshot, work_dir, tomlfile_path, verbose)
-
-    # Other dependencies
-    deps = config.get("deps")
-    if deps is not None:
-        handle_other_deps(deps, snapshot, work_dir, archive_dir, verbose)
-
-    # Load docker-helpers into the snapshot
-    load_docker_helpers(snapshot, verbose)
-
-    # Handle apt installed packages
-    apt_packages = config.get("apt")
-    if apt_packages is not None:
-        repack_apt_installed_packages(apt_packages, archive_dir, snapshot, verbose)
-        # Copy the install script to the apt-folder
-        shutil.copyfile(
-            Path(__file__).parent / "exports" / "install.sh",
-            archive_dir / "apt" / "install.sh",
-        )
-
-    # Create the lockfile and store the snapshot in it
-    with open(lockfile_path, "w") as f:
-        json.dump(snapshot, f)
-
-    # Copy the TOML-file into the archive
-    shutil.copyfile(tomlfile_path, archive_dir / "ugle.toml")
-
     # Create filename for zip-file
     date = str(datetime.date.today())
     name = name + "-" + date
     zip_path = work_dir / f"{name}"
     zip_file = zip_path.with_suffix(".zip")
 
-    # If the zip-file already exists, overwrite it
-    if zip_file.exists():
-        print(f"{zip_file} already exists. Will overwrite")
-        os.remove(zip_file)
+    # Set the lockfile-path
+    lockfile_path = archive_dir / "ugle.lock"
 
-    # TODO: Error handling
-    verbose_print(verbose, f"Creating zip-file at {zip_file}")
-    shutil.make_archive(str(zip_path), format="zip", root_dir=str(archive_dir))
+    # Surround the following in a try-block so we can clean up in case an error
+    # is thrown
+    try:
+        # If there is a Spack entry, handle it
+        spack_config = config.get("spack")
+        if spack_config is not None:
+            spack_deps(spack_config, snapshot, work_dir, tomlfile_path, verbose)
 
-    # Delete the archive_dir
-    verbose_print(verbose, f"Cleaning up {archive_dir}")
-    shutil.rmtree(archive_dir)
+        # Other dependencies
+        deps = config.get("deps")
+        if deps is not None:
+            print()
+            print("=" * 20)
+            print("LOCAL DEPENDENCIES:")
+            print()
+            handle_other_deps(deps, snapshot, work_dir, archive_dir, verbose)
+
+        # Load docker-helpers into the snapshot
+        load_docker_helpers(snapshot, verbose)
+
+        # Handle apt installed packages
+        apt_packages = config.get("apt")
+        if apt_packages is not None:
+            print()
+            print("=" * 20)
+            print("APT PACKAGES:")
+            repack_apt_installed_packages(apt_packages, archive_dir, snapshot, verbose)
+            # Copy the install script to the apt-folder
+            shutil.copyfile(
+                Path(__file__).parent / "exports" / "install.sh",
+                archive_dir / "apt" / "install.sh",
+            )
+
+        # Create the lockfile and store the snapshot in it
+        with open(lockfile_path, "w") as f:
+            json.dump(snapshot, f)
+
+        # Copy the TOML-file into the archive
+        shutil.copyfile(tomlfile_path, archive_dir / "ugle.toml")
+
+        print()
+        print("=" * 20)
+        print("ZIP")
+        # If the zip-file already exists, overwrite it
+        if zip_file.exists():
+            print(f"'{zip_file}' already exists. Will overwrite")
+            os.remove(zip_file)
+
+        # TODO: Error handling
+        verbose_print(verbose, f"Creating zip-file at '{zip_file}'")
+        shutil.make_archive(str(zip_path), format="zip", root_dir=str(archive_dir))
+
+    finally:
+        # When everything has been run, remove the archive directory regardless
+        # of errors thrown
+        verbose_print(verbose, "")
+        verbose_print(verbose, "=" * 20)
+        verbose_print(verbose, f"Cleaning up '{archive_dir}'")
+        shutil.rmtree(archive_dir)
 
     print()
     print("#" * 60)
@@ -154,9 +179,11 @@ def spack_deps(
         None
     """
     # This should exist
+    print()
+    print("SPACK:")
     lockfile_str = spack_config.get("lockfile")
     if lockfile_str is None:
-        raise KeyError(f"No attribute called 'lockfile' in {tomlfile_path}.")
+        raise KeyError(f"No attribute called 'lockfile' in '{tomlfile_path}'")
     lockfile_path = Path(lockfile_str)
 
     # Resolves the path to an absolute path
@@ -167,11 +194,11 @@ def spack_deps(
         raise FileNotFoundError(err_msg)
 
     # Extract the contents of the lockfile
-    verbose_print(verbose, f"Loading contents of {lockfile_path}")
+    verbose_print(verbose, f"Loading contents of '{lockfile_path}'")
     with open(lockfile_path, "r") as f:
         lockfile_content = json.load(f)
 
-    verbose_print(verbose, f"Storing contents of {lockfile_path} in snapshot")
+    print(f"Storing contents of '{lockfile_path}' in snapshot")
     # Store the contents of the lockfile in the snapshot
     snapshot["spack"] = lockfile_content
 
@@ -236,23 +263,26 @@ def local_dep_copy(
     verbose: bool = False,
 ):
     filepath = create_absolute_path(Path(filepath_str), work_dir)
-    print()
-    print("=" * 10)
-    print(f"{name.upper()} (BY COPY): ")
-    print(f"Looking for {name} in {filepath}")
+    print("-" * 30)
+    print(f"Snapshot of '{name}' (BY COPY): ")
+    print(f"Looking for {name} in '{filepath}'")
     if not filepath.exists():
-        raise FileNotFoundError(f"Filepath {filepath} does not exist")
+        raise FileNotFoundError(f"Filepath '{filepath}' does not exist")
     if not filepath.is_dir():
-        raise Exception(f"Filepath {filepath} is not a directory")
+        raise Exception(f"Filepath '{filepath}' is not a directory")
 
     dest = archive_dir / name
     verbose_print(verbose, f"Destination: {dest}")
     if dest.exists():
         verbose_print(verbose, f"{dest} already exists. Creating new destination-name")
         dest.with_name(dest.name + "-" + str(uuid.uuid4()))
+
     # Copy the dependency to the temporary folder that is to be zipped
-    verbose_print(verbose, f"Copy {filepath} to {dest}")
-    subprocess.run(["cp", "-r", filepath, dest], capture_output=True)
+    verbose_print(verbose, f"Copy '{filepath}' to '{dest}'")
+    output = subprocess.run(["cp", "-r", filepath, dest], capture_output=True)
+    check_subprocess_error(output)
+
+    # Set copy to True in snapshot
     snapshot["deps"][name] = {
         "copy": True,
     }
@@ -294,29 +324,24 @@ def local_dep_git(
         None
     """
     filepath = create_absolute_path(Path(filepath_str), work_dir)
-    print()
-    print("=" * 10)
-    print(f"{name.upper()} (BY GIT): ")
+    print("-" * 30)
+    print(f"Snapshot of '{name}' (BY GIT): ")
     print(f"Looking for {name} in {filepath}")
     if not filepath.exists():
         raise FileNotFoundError(f"Filepath {filepath} does not exist")
     if not filepath.is_dir():
         raise Exception(f"Filepath {filepath} is not a directory")
 
+    # Get git status of the repo at <filepath>
     git_status = subprocess.run(
         ["git", "status", "--porcelain"], capture_output=True, cwd=filepath
     )
-    # If something goes wrong with the above command, it needs to be fixed
-    # outside the script
-    if not git_status.returncode == 0:
-        raise Exception(
-            git_status.stderr.decode()
-            + f"\n\nEncountered while processing {name} at {filepath}"
-        )
+    check_subprocess_error(git_status, filepath)
 
     verbose_print(verbose, "" * 4)
     verbose_print(verbose, "Checking the working tree")
     if git_status.stdout.decode() != "":
+        print()
         print("*" * 90)
         print("WARNING!")
         print(f"The working tree of {filepath} is not clean:")
@@ -328,22 +353,23 @@ def local_dep_git(
 
     verbose_print(verbose, "" * 4)
     verbose_print(verbose, "Getting commit-hash")
-    # Get the commit-hash of the commit currently being check out
-    commit_hash = (
-        subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, cwd=filepath)
-        .stdout.decode()
-        .strip()
+    # Get the commit-hash of the commit currently being checked out
+    output = subprocess.run(
+        ["git", "rev-parse", "HEAD"], capture_output=True, cwd=filepath
     )
+    check_subprocess_error(output, filepath)
+    commit_hash = output.stdout.decode().strip()
     verbose_print(verbose, f"Commit-hash: {commit_hash}")
-    verbose_print(verbose, "" * 4)
 
     # If url is not defined, try to get it from 'git remove -v'
+    verbose_print(verbose, "" * 4)
     if url is None:
         verbose_print(verbose, "Trying to get url with 'git remote -v'")
 
         remote_cmd = subprocess.run(
             ["git", "remote", "-v"], capture_output=True, cwd=filepath
         )
+        check_subprocess_error(remote_cmd, filepath)
         # Regex for getting the remote url. We pick the push url since this is
         # most likely to contain new updates
         url_remote_cmd = re.findall(
@@ -361,7 +387,7 @@ def local_dep_git(
     else:
         verbose_print(verbose, f"url: {url}")
 
-    verbose_print(verbose, f"" * 4)
+    print()
     print(f"Adding {name} to snapshot")
 
     # If there a url exists, add it to the lockfile
@@ -396,3 +422,9 @@ def load_docker_helpers(snapshot: dict, verbose: bool = False):
     snapshot["dockerhead"] = docker_head
     snapshot["dockertail"] = docker_tail
     snapshot["docker-compose"] = docker_compose
+
+
+def check_script_dependencies():
+    check_tool_existence("git")
+    check_tool_existence("dpkg-repack")
+    check_tool_existence("cp")

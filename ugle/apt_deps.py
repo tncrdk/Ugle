@@ -8,10 +8,8 @@ from graphlib import TopologicalSorter
 
 from utils import verbose_print
 
-# TODO: If apt-cache | dpkg-repack is not a command, it will throw an error (FileNotFoundError)
 # TODO: Use lsb_release to get the ubuntu version (unstable and does not work
 # all the time -> default bakcup?)
-# TODO: Handle failed packages (raise exception?)
 
 
 def repack_apt_installed_packages(
@@ -34,8 +32,9 @@ def repack_apt_installed_packages(
         # If we have processed this package before, skip it this time
         if predep_tree.get(package) is not None:
             continue
-        print("-" * 10)
-        print(f"Repacking {package} and dependencies")
+        print()
+        print(f"Repacking '{package}' and dependencies")
+        verbose_print(verbose, "-" * 30)
         # Find all dependencies and run dpkg-repack on all them
         repack_packages_recursive(
             package, apt_dir, predep_tree, name_filename_map, failed_packages, verbose
