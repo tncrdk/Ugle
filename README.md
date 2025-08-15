@@ -1,6 +1,7 @@
 # Ugle <sub><sup>*[u`glə]*</sup></sub>
-Prototype of a program meant to create snapshots of multiple git repos scattered
-across the filesystem and dependencies installed with `Spack`.
+Prototype of a program meant to create snapshots of multiple projects scattered
+across the filesystem, along with dependencies installed with either `Spack` or
+`apt`.
 
 ## How does it work?
 ### Snapshotting
@@ -47,6 +48,7 @@ will try to clone the repo into the snapshot location.
 Clone the repo locally and add only `main.py` to PATH.
 
 **Example**
+
 Clone the repo into a folder of your choice, then run the following:
 ```sh
 mkdir -p ~/.local/bin/

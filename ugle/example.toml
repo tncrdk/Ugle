@@ -8,10 +8,14 @@ lockfile = <spack lock-file path>
 # Both url and copy are optional
 [deps.foo-dependency]
 filepath = <filepath>
-url = <github:url>
+url = <source-url>  # If the local repository has a defined remote named origin,
+                    # the program will find the url automatically
 copy = <bool> # Defaults to True if omitted
 
-[deps.bar-dependency]
+[deps.bar-dependency] # Will be copied
 filepath = <filepath>
-url = <github:url>
 
+[deps.bar-dependency] # Will be stored as commit hash
+filepath = <filepath>
+url = <source-url>
+copy = false
