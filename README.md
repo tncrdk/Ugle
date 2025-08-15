@@ -83,7 +83,6 @@ lockfile = "~/<spack-installation>/spack/var/spack/environments/<name>/spack.loc
 [deps.benchmark]
 filepath = "~/<Benchmarking>/benchmark/"
 copy = false
-# url = "https://github.com/OPM/IFEM.git"
 
 [deps.disk]
 filepath = "~/<Benchmarking>/disk/"
