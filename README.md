@@ -55,3 +55,9 @@ mkdir -p ~/.local/bin/
 cd ~/.local/bin/
 ln -s $path-to-main.py ugle
 ```
+
+### Dependencies
+- Python3.12 (or higher)
+- apt-cache
+- dpkg-repack
+- git
